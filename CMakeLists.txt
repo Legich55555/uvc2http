@@ -5,7 +5,7 @@ project(uvc_streamer)
 # _GLIBCXX_USE_C99 is defined to use snprintf. 
 # -fpermissive is used to allow simple initialization for structures
 # -static-libstdc++ 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_C99 -std=c++11 -fpermissive -Wall -fno-exceptions")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_C99 -std=c++11 -static-libstdc++ -fpermissive -Wall -fno-exceptions")
 
 add_library(uvc_streamer_lib STATIC Tracer.cpp StreamFunc.cpp Config.cpp HttpServer.cpp UvcGrabber.cpp MjpegUtils.cpp)
 
