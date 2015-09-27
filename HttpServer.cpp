@@ -32,6 +32,7 @@
 #include <sys/select.h>
 
 #include "MjpegUtils.h"
+#include "Tracer.h"
 
 namespace {
 
@@ -69,7 +70,6 @@ HttpServer::HttpServer()
 HttpServer::~HttpServer()
 {
   Shutdown();
-  
 }
 
 bool HttpServer::Init(const char* servicePort)
@@ -83,7 +83,7 @@ bool HttpServer::Init(const char* servicePort)
   
   addrinfo* addrInfoHead;
   if ((result = ::getaddrinfo(nullptr, servicePort, &addrHints, &addrInfoHead)) != 0) {
-    std::perror(::gai_strerror(result));
+    Tracer::LogErrNo(::gai_strerror(result));
     return false;
   }
   
@@ -94,7 +94,7 @@ bool HttpServer::Init(const char* servicePort)
       _listeningFds.push_back(currAddrFd);
     }
     else {
-      std::fprintf(stderr, "Failed to create a listening socket.\n");
+      Tracer::Log("Failed to create a listening socket.\n");
     }
     
     currAddrInfo = currAddrInfo->ai_next;
@@ -149,7 +149,7 @@ void HttpServer::ServeRequests(long maxServeTimeMicroSec)
   timeval selectTimeSpec = { 0 };
   int result = ::select(maxFd + 1, &selectfds, nullptr, nullptr, &selectTimeSpec);
   if (result < 0 && errno != EINTR) {
-    std::perror("select().\n");
+    Tracer::LogErrNo("select().");
     return;
   }
   
@@ -164,7 +164,7 @@ void HttpServer::ServeRequests(long maxServeTimeMicroSec)
         if (GetClientsNumber() < MaxClientsNum) {
           result = ::fcntl(clientFd, F_SETFL, O_NONBLOCK);
           if (-1 == result) {
-            std::perror("fcntl() F_SETFL, O_NONBLOCK.\n");
+            Tracer::LogErrNo("fcntl() F_SETFL, O_NONBLOCK.");
             ::close(clientFd);
           }
           else {
@@ -172,12 +172,12 @@ void HttpServer::ServeRequests(long maxServeTimeMicroSec)
           }
         }
         else {
-          std::fprintf(stderr, "Client dropped because of MaxClientsNum.\n");
+          Tracer::Log("Client dropped because of MaxClientsNum.\n");
           ::close(clientFd);
         }
       }
       else {
-        std::perror("accept().\n");
+        Tracer::LogErrNo("accept().");
       }
     }
   }
@@ -224,14 +224,14 @@ void HttpServer::ReadAndParseRequests()
   timeval selectTimeSpec = {0};
   int result = ::select(maxFd + 1, &selectFds, nullptr, nullptr, &selectTimeSpec);
   if (result < 0 && errno != EINTR && errno != EBADF) {
-    std::perror("select().\n");
+    Tracer::LogErrNo("select().");
     
     // Something wrong happened with waiting clients. Drop all of them.
     
     for (auto clientFdIt : _waitingClients) {
       result = ::close(clientFdIt.first);
       if (result < 0) {
-        std::perror("close().\n");
+        Tracer::LogErrNo("close().");
       }
     }
     
@@ -270,7 +270,7 @@ void HttpServer::ReadAndParseRequests()
   
   for (auto brokenClientFd : brokenClientFds) {
     if (::close(brokenClientFd) != 0) {
-      std::perror("close().\n");
+      Tracer::LogErrNo("close().");
     }
   }
   
@@ -305,7 +305,7 @@ void HttpServer::SendData(long timeoutMicroSec)
   
   int result = ::select(maxFd + 1, nullptr, &selectFds, nullptr, &selectTimeSpec);
   if (result < 0 && errno != EINTR) {
-    std::perror("select().\n");
+    Tracer::LogErrNo("select().");
     return;
   }
   
@@ -336,7 +336,7 @@ void HttpServer::SendData(long timeoutMicroSec)
           else {
             // Stop sending data to the current client as something went wrong.
             shouldBreak = true;
-            std::perror("write().\n");
+            Tracer::LogErrNo("write().");
             brokenClientFds.push_back(clientFd);
           }
         }      
@@ -390,7 +390,7 @@ void HttpServer::SendData(long timeoutMicroSec)
             else {
               // Stop sending data to the current client as something went wrong.
               shouldBreak = true;
-              std::perror("write().\n");
+              Tracer::LogErrNo("write().");
               brokenClientFds.push_back(clientFd);
 
               queueItem->UsageCounter -= 1;
@@ -405,7 +405,7 @@ void HttpServer::SendData(long timeoutMicroSec)
     _beingServedClients.erase(clientFd);
     
     if (-1 == ::close(clientFd)) {
-      std::perror("close().\n");
+      Tracer::LogErrNo("close().");
     }
   }  
 }
@@ -458,13 +458,13 @@ bool HttpServer::QueueBuffer(const VideoBuffer* videoBuffer)
                         frameSize, videoBuffer->V4l2Buffer.timestamp.tv_sec,
                         videoBuffer->V4l2Buffer.timestamp.tv_usec);
   if (result <= 0) {
-    std::fprintf(stderr, "Failed to create HTTP header for MJPEG frame: snprintf.\n");
+    Tracer::Log("Failed to create HTTP header for MJPEG frame: snprintf.\n");
     return false;
   }
   
   uint32_t headerSize = static_cast<uint32_t>(result);
   if (headerSize > frameHeaderBuff.size()) {
-    std::fprintf(stderr, "Failed to create HTTP header for MJPEG frame. buffer is \n");
+    Tracer::Log("Failed to create HTTP header for MJPEG frame. buffer is \n");
     return false;
   }
 
@@ -497,7 +497,7 @@ const VideoBuffer* HttpServer::DequeueBuffer()
 // This code is for debugging slow clients      
 //       if (!_beingServedClients.empty()) {
 //         if (0 == currIt->SentCounter) {
-//           std::fprintf(stderr, "HttpServer missed frame %d %ld.%06ld\n",
+//           Tracer::Log("HttpServer missed frame %d %ld.%06ld\n",
 //                  dequeuedBuffer->V4l2Buffer.sequence,
 //                  dequeuedBuffer->V4l2Buffer.timestamp.tv_sec,
 //                  dequeuedBuffer->V4l2Buffer.timestamp.tv_usec);
@@ -518,7 +518,7 @@ const VideoBuffer* HttpServer::DequeueBuffer()
 //         }
 //         
 //         if (delta > 40000) {
-//           std::fprintf(stderr, "Latency detected for frame %d: %ld\n", dequeuedBuffer->V4l2Buffer.sequence, delta);
+//           Tracer::Log("Latency detected for frame %d: %ld\n", dequeuedBuffer->V4l2Buffer.sequence, delta);
 //         }
 //         
 //         lastSentTs = dequeuedBuffer->V4l2Buffer.timestamp;
@@ -580,10 +580,10 @@ std::vector<const VideoBuffer*> HttpServer::DequeueAllBuffers()
       _beingServedClients.erase(clientFd);
     
       if (-1 == ::close(clientFd)) {
-        std::perror("close().\n");
+        Tracer::LogErrNo("close().");
       }
       
-      std::fprintf(stderr, "Closed slow client.");
+      Tracer::Log("Closed slow client.");
     }  
   }
   
@@ -598,20 +598,20 @@ void HttpServer::Shutdown()
   
   for (auto client : _beingServedClients) {
     if (-1 == ::close(client.first)) {
-      std::perror("close().\n");
+      Tracer::LogErrNo("close().");
     }
   }  
   _beingServedClients.clear();
   
   for (auto client : _waitingClients) {
     if (-1 == ::close(client.first)) {
-      std::perror("close().\n");
+      Tracer::LogErrNo("close().");
     }
   }  
   
   for (auto fd : _listeningFds) {
     if (-1 == ::close(fd)) {
-      std::perror("close().\n");
+      Tracer::LogErrNo("close().");
     }
   } 
   
@@ -625,23 +625,23 @@ namespace {
     // Ignore "socket already in use" errors 
     int reuseAddrValue = 1;
     if (::setsockopt(socketFd, SOL_SOCKET, SO_REUSEADDR, &reuseAddrValue, sizeof(reuseAddrValue)) != 0) {
-      std::perror("setsockopt(SO_REUSEADDR) failed.\n");
+      Tracer::LogErrNo("setsockopt(SO_REUSEADDR).");
       return false;
     }
     
     // Switch to non-blocking mode
     if (::fcntl(socketFd, F_SETFL, O_NONBLOCK) < 0) {
-      std::perror("fcntl(F_SETFL, O_NONBLOCK) failed.\n");
+      Tracer::LogErrNo("fcntl(F_SETFL, O_NONBLOCK).");
       return false;
     }
     
     if (::bind(socketFd, addrInfo->ai_addr, addrInfo->ai_addrlen) != 0) {
-      std::perror("bind() failed.\n");
+      Tracer::LogErrNo("bind().");
       return false;
     }
     
     if (::listen(socketFd, maxPendingConnections) != 0) {
-      std::perror("listen() failed.\n");
+      Tracer::LogErrNo("listen().");
       return false;
     }
     
@@ -654,13 +654,13 @@ namespace {
 
     int socketFd = ::socket(addrInfo->ai_family, addrInfo->ai_socktype, 0);
     if (-1 == socketFd) {
-      std::perror("Failed to create a socket.\n");
+      Tracer::LogErrNo("Failed to create a socket.");
       return -1;
     }
     
     if (!SetupListeningSocket(socketFd, addrInfo, MaxPendingConnections)) {
       ::close(socketFd);
-      std::fprintf(stderr, "Failed to configure a listening socket.\n");
+      Tracer::Log("Failed to configure a listening socket.");
       return -1;
     }
     

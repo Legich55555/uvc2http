@@ -33,6 +33,7 @@
 
 #include <vector>
 
+#include "Tracer.h"
 #include "Buffer.h"
 
 static const uint32_t IoctlMaxTries = 5U;
@@ -73,7 +74,7 @@ bool UvcGrabber::Init()
   
   int cameraFd = open(_config.CameraDeviceName.c_str(), O_RDWR | O_NONBLOCK);
   if (-1 == cameraFd) {
-    std::fprintf(stderr, "Failed open().\n");
+    Tracer::LogErrNo("Failed open().\n");
     return false;
   }
   
@@ -84,7 +85,7 @@ bool UvcGrabber::Init()
   
   std::vector<VideoBuffer> videoBuffers = SetupBuffers(cameraFd, _config.BuffersNumber);
   if (videoBuffers.empty()) {
-    std::fprintf(stderr, "Failed SetupBuffers().\n");
+    Tracer::Log("Failed SetupBuffers().\n");
     ::close(cameraFd);
     return false;
   }
@@ -92,7 +93,7 @@ bool UvcGrabber::Init()
   int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   int ioctlResult = Ioctl(cameraFd, VIDIOC_STREAMON, IoctlMaxTries, &type);
   if (ioctlResult != 0) {
-    std::fprintf(stderr, "Failed Ioctl(VIDIOC_STREAMON).\n");
+    Tracer::Log("Failed Ioctl(VIDIOC_STREAMON).\n");
     FreeBuffers(cameraFd, videoBuffers);
     ::close(cameraFd);
     return false;
@@ -117,7 +118,7 @@ void UvcGrabber::Shutdown()
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     int ioctlResult = Ioctl(_cameraFd, VIDIOC_STREAMOFF, IoctlMaxTries, &type);
     if (ioctlResult != 0) {
-      std::fprintf(stderr, "Failed Ioctl(VIDIOC_STREAMOFF).\n");
+      Tracer::Log("Failed Ioctl(VIDIOC_STREAMOFF).\n");
     }
 
     FreeBuffers(_cameraFd, _videoBuffers);
@@ -132,7 +133,7 @@ void UvcGrabber::Shutdown()
 const VideoBuffer* UvcGrabber::DequeuFrame()
 {
   if (_isBroken) {
-    std::fprintf(stderr, "Invalid call for DequeuFrame.\n");
+    Tracer::Log("Invalid call for DequeuFrame.\n");
     return nullptr;
   }
   
@@ -143,7 +144,7 @@ const VideoBuffer* UvcGrabber::DequeuFrame()
   int ioctlResult = Ioctl(_cameraFd, VIDIOC_DQBUF, IoctlMaxTries, &v4l2Buffer);
   if (ioctlResult != 0) {
     if (errno != EAGAIN && errno != EINTR && errno != ETIMEDOUT) {
-      std::fprintf(stderr, "Failed Ioctl(VIDIOC_DQBUF) %d.\n", errno);
+      Tracer::Log("Failed Ioctl(VIDIOC_DQBUF) %d.\n", errno);
       _isBroken = true;
     }
 
@@ -151,11 +152,11 @@ const VideoBuffer* UvcGrabber::DequeuFrame()
   }
   
   if (v4l2Buffer.index >= _videoBuffers.size()) {
-    std::fprintf(stderr, "Unexpected buffer index.\n");
+    Tracer::Log("Unexpected buffer index.\n");
 
     ioctlResult = Ioctl(_cameraFd, VIDIOC_QBUF, IoctlMaxTries, &v4l2Buffer);
     if (ioctlResult != 0) {
-      std::fprintf(stderr, "Failed Ioctl(VIDIOC_QBUF).\n");
+      Tracer::Log("Failed Ioctl(VIDIOC_QBUF).\n");
     }
     
     _isBroken = true;
@@ -172,7 +173,7 @@ const VideoBuffer* UvcGrabber::DequeuFrame()
 void UvcGrabber::RequeueFrame(const VideoBuffer* videoBuffer) 
 {
   if (videoBuffer->V4l2Buffer.index >= _videoBuffers.size()) {
-    std::fprintf(stderr, "Unexpected buffer index.\n");
+    Tracer::Log("Unexpected buffer index.\n");
     return;
   }
   
@@ -180,7 +181,7 @@ void UvcGrabber::RequeueFrame(const VideoBuffer* videoBuffer)
 
   int ioctlResult = Ioctl(_cameraFd, VIDIOC_QBUF, IoctlMaxTries, &(origVideoBuffer.V4l2Buffer));
   if (ioctlResult < 0) {
-    std::fprintf(stderr, "Failed Ioctl(VIDIOC_QBUF).\n");
+    Tracer::Log("Failed Ioctl(VIDIOC_QBUF).\n");
     _isBroken = true;
   }
 }
@@ -208,7 +209,7 @@ namespace
     // Unmap buffers
     for (size_t bufferIdx = 0; bufferIdx < videoBuffers.size(); ++bufferIdx) {
       if (0 != munmap(const_cast<uint8_t*>(videoBuffers[bufferIdx].Data), videoBuffers[bufferIdx].Length)) {
-        std::fprintf(stderr, "Failed munmap().\n");
+        Tracer::Log("Failed munmap().\n");
       }
     }
     
@@ -219,7 +220,7 @@ namespace
     requestBuffers.memory = V4L2_MEMORY_MMAP;
     int ioctlResult = Ioctl(cameraFd, VIDIOC_REQBUFS, IoctlMaxTries, &requestBuffers);
     if (ioctlResult < 0) {
-      std::fprintf(stderr, "Failed Ioctl(VIDIOC_REQBUFS).\n");
+      Tracer::Log("Failed Ioctl(VIDIOC_REQBUFS).\n");
     }
       
     videoBuffers.resize(0);
@@ -237,7 +238,7 @@ namespace
       requestBuffers.memory = V4L2_MEMORY_MMAP;
       int ioctlResult = Ioctl(cameraFd, VIDIOC_REQBUFS, IoctlMaxTries, &requestBuffers);
       if (ioctlResult < 0) {
-        std::fprintf(stderr, "Failed Ioctl(VIDIOC_REQBUFS).\n");
+        Tracer::Log("Failed Ioctl(VIDIOC_REQBUFS).\n");
         return videoBuffers;
       }
     }
@@ -250,19 +251,19 @@ namespace
       
       int ioctlResult = Ioctl(cameraFd, VIDIOC_QUERYBUF, IoctlMaxTries, &buffer);
       if (ioctlResult != 0) {
-        std::fprintf(stderr, "Failed Ioctl(VIDIOC_QUERYBUF).\n");
+        Tracer::Log("Failed Ioctl(VIDIOC_QUERYBUF).\n");
         break;
       }
 
       ioctlResult = Ioctl(cameraFd, VIDIOC_QBUF, IoctlMaxTries, &buffer);
       if (ioctlResult != 0) {
-        std::fprintf(stderr, "Failed Ioctl(VIDIOC_QBUF).\n");
+        Tracer::Log("Failed Ioctl(VIDIOC_QBUF).\n");
         break;
       }
 
       void* bufferAddress = mmap(0, buffer.length, PROT_READ | PROT_WRITE, MAP_SHARED, cameraFd, buffer.m.offset);
       if (bufferAddress == MAP_FAILED) {
-        std::fprintf(stderr, "Failed mmap().\n");
+        Tracer::Log("Failed mmap().\n");
         break;
       }
       
@@ -286,17 +287,17 @@ namespace
     v4l2_capability cameraCaps = {0};
     int ioctlResult = Ioctl(cameraFd, VIDIOC_QUERYCAP, IoctlMaxTries, &cameraCaps);
     if (ioctlResult < 0) {
-      std::fprintf(stderr, "Ioctl(VIDIOC_QUERYCAP) failed.\n");
+      Tracer::Log("Ioctl(VIDIOC_QUERYCAP) failed.\n");
       return false;
     }
 
     if (!(cameraCaps.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
-      std::fprintf(stderr, "Error: device does not support video capture.\n");
+      Tracer::Log("Error: device does not support video capture.\n");
       return false;
     }
 
     if (!(cameraCaps.capabilities & V4L2_CAP_STREAMING)) {
-      std::fprintf(stderr, "Error: device does not support streaming\n");
+      Tracer::Log("Error: device does not support streaming\n");
       return false;
     }
 
@@ -308,7 +309,7 @@ namespace
     streamFormat.fmt.pix.field = V4L2_FIELD_ANY;  
     ioctlResult = Ioctl(cameraFd, VIDIOC_S_FMT, IoctlMaxTries, &streamFormat);
     if (ioctlResult < 0) {
-      std::fprintf(stderr, "Failed Ioctl(VIDIOC_S_FMT + V4L2_BUF_TYPE_VIDEO_CAPTURE).\n");
+      Tracer::Log("Failed Ioctl(VIDIOC_S_FMT + V4L2_BUF_TYPE_VIDEO_CAPTURE).\n");
       return false;
     }
 
@@ -318,7 +319,7 @@ namespace
       streamParm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
       ioctlResult = Ioctl(cameraFd, VIDIOC_G_PARM, IoctlMaxTries, &streamParm);
       if (ioctlResult < 0) {
-        std::fprintf(stderr, "Failed Ioctl(VIDIOC_G_PARM + V4L2_BUF_TYPE_VIDEO_CAPTURE), error: %d\n", ioctlResult);
+        Tracer::Log("Failed Ioctl(VIDIOC_G_PARM + V4L2_BUF_TYPE_VIDEO_CAPTURE), error: %d\n", ioctlResult);
         return false;
       }
     }
@@ -330,30 +331,13 @@ namespace
       streamParm.parm.capture.timeperframe.denominator = config.FrameRate;
       ioctlResult = Ioctl(cameraFd, VIDIOC_S_PARM, IoctlMaxTries, &streamParm);
       if (ioctlResult < 0) {
-        std::fprintf(stderr, "Failed Ioctl(VIDIOC_S_PARM + V4L2_BUF_TYPE_VIDEO_CAPTURE), error: %d\n", ioctlResult);
+        Tracer::Log("Failed Ioctl(VIDIOC_S_PARM + V4L2_BUF_TYPE_VIDEO_CAPTURE), error: %d\n", ioctlResult);
         return false;
       }
     }
 
-    v4l2_control control = {0};
-    control.id = V4L2_CID_EXPOSURE_AUTO;
-    control.value = V4L2_EXPOSURE_MANUAL;
-    ioctlResult = Ioctl(cameraFd, VIDIOC_S_CTRL, IoctlMaxTries, &control);
-    if (ioctlResult != 0) {
-      std::fprintf(stderr, "Failed Ioctl(VIDIOC_S_CTRL + V4L2_CID_EXPOSURE_AUTO), error: %d\n", ioctlResult);
-      return false;
-    }
-
-    control.id = V4L2_CID_EXPOSURE_ABSOLUTE;
-    control.value = 100;
-    ioctlResult = Ioctl(cameraFd, VIDIOC_S_CTRL, IoctlMaxTries, &control);
-    if (ioctlResult != 0) {
-      std::fprintf(stderr, "Failed Ioctl(VIDIOC_S_CTRL + V4L2_CID_EXPOSURE_ABSOLUTE), error: %d\n", ioctlResult);
-      return false;
-    }
-    
     if (config.SetupCamera != nullptr && !config.SetupCamera(cameraFd)) {
-      std::fprintf(stderr, "Failed custom SetupCamera\n");
+      Tracer::Log("Failed custom SetupCamera\n");
       return false;
     }
     
