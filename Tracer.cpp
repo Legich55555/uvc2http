@@ -27,40 +27,43 @@
 #include <syslog.h>
 #include <errno.h>
 
-namespace {
-  bool IsStdErrReady() {
-    return fileno(stderr) != -1;
-  }
-}
-
 namespace Tracer {
   static const char* TraceName = "UvcStreamer"; 
   
-  void Log(const char* format, ...) {
+  namespace {
+    bool IsStdErrReady() {
+      return fileno(stderr) != -1;
+    }
     
+    void LogVArgs( const char* format, va_list args) {
+      
+      if (IsStdErrReady()) {
+        std::vfprintf(stderr, format, args);
+      }
+      else {
+        static bool isSysLogInitialized = false;
+        if (!isSysLogInitialized) {
+          ::openlog(Tracer::TraceName, LOG_ODELAY, LOG_USER | LOG_ERR);
+          isSysLogInitialized = true;
+        }
+
+        ::vsyslog(LOG_ERR, format, args);
+      }
+    }
+  }
+
+
+  void Log(const char* format, ...) {
     va_list args;
     va_start(args, format);
-
-    if (IsStdErrReady()) {
-      std::vfprintf(stderr, format, args);
-    }
-    else {
-      static bool isSysLogInitialized = false;
-      if (!isSysLogInitialized) {
-        ::openlog(TraceName, LOG_ODELAY, LOG_USER | LOG_ERR);
-        isSysLogInitialized = true;
-      }
-
-      ::vsyslog(LOG_ERR, format, args);
-    }
-
+    LogVArgs(format, args);
     va_end(args);
   }
   
   void LogErrNo(const char* format, ...) {
     va_list args;
     va_start(args, format);
-    Log(format, args);
+    LogVArgs(format, args);
     va_end(args);
 
     const char* errnoDescription = strerror(errno);
