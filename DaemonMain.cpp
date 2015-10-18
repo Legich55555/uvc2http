@@ -106,8 +106,14 @@ bool SetupCamera(int cameraFd) {
 
 int main(int argc, char **argv) {
 
-  int pid = fork();
+  UvcStreamerCfg config = GetConfig(argc, argv);
+  if (!config.IsValid) {
+		return -1;
+	}
 
+  config.GrabberCfg.SetupCamera = SetupCamera;
+    
+  int pid = fork();
   if (-1 == pid)
   {
     Tracer::Log("fork() failed");
@@ -126,13 +132,6 @@ int main(int argc, char **argv) {
     ::fclose(stdout);
     ::fclose(stdin);
 
-    UvcStreamerCfg config = GetConfig(argc, argv);
-    if (!config.IsValid) {
-      return -1;
-    }
-    
-    config.GrabberCfg.SetupCamera = SetupCamera;
-    
     // Ignore SIGPIPE (OS sends it in case of transmitting to a closed TCP socket)
     if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
       Tracer::Log("Failed to setup SIGPIPE handler.\n");
