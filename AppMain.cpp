@@ -22,7 +22,8 @@
 #include <cstdio>
 #include <unistd.h>
 #include <signal.h>
-#include <time.h>
+#include <sys/ioctl.h>
+#include <linux/videodev2.h>
 
 #include "Tracer.h"
 #include "Config.h"
@@ -39,15 +40,58 @@ namespace {
   bool IsSigIntRaised(void) {
     return IsSigIntRaisedFlag;
   }
+  
+  // This function disables auto focus and sets focus distance to ~1.2 meter (good choice for RC toys cameras). 
+  bool SetupCamera(int cameraFd) {
+    {
+      // Disable auto focus
+      
+      v4l2_ext_controls ext_ctrls = {0};
+      v4l2_ext_control ext_ctrl = {0};
+      ext_ctrl.id = 10094860;
+      ext_ctrl.value64 = 0;
+
+      ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
+      ext_ctrls.count = 1;
+      ext_ctrls.controls = &ext_ctrl;
+      int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
+      if (ioctlResult != 0) {
+        return false;
+      }
+    }
+
+    { 
+      // Set focus range ~1.2 meter
+      
+      const int focusValue = 80;
+    
+      v4l2_ext_controls ext_ctrls = {0};
+      v4l2_ext_control ext_ctrl = {0};
+      ext_ctrl.id = 10094858;
+      ext_ctrl.value64 = focusValue;
+
+      ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
+      ext_ctrls.count = 1;
+      ext_ctrls.controls = &ext_ctrl;
+      int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
+      if (ioctlResult != 0) {
+        return false;
+      }
+    }
+
+    return true;
+  }
 }
 
 int main(int argc, char **argv) {
   
-  const UvcStreamerCfg config = GetConfig(argc, argv);
+  UvcStreamerCfg config = GetConfig(argc, argv);
   if (!config.IsValid) {
     PrintUsage();
     return -1;
   }
+  
+  config.GrabberCfg.SetupCamera = SetupCamera;
   
   // Ignore SIGPIPE (OS sends it in case of transmitting to a closed TCP socket)
   if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {

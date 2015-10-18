@@ -1,18 +1,17 @@
 cmake_minimum_required(VERSION 2.8)
 
-project(uvc_streamer)
+project(Uvc2Http)
 
 # _GLIBCXX_USE_C99 is defined to use snprintf. 
 # -fpermissive is used to allow simple initialization for structures
-# -static-libstdc++ 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_C99 -std=c++11 -static-libstdc++ -fpermissive -Wall -fno-exceptions")
 
-add_library(uvc_streamer_lib STATIC Tracer.cpp StreamFunc.cpp Config.cpp HttpServer.cpp UvcGrabber.cpp MjpegUtils.cpp)
+add_library(uvc2http_lib STATIC Tracer.cpp StreamFunc.cpp Config.cpp HttpServer.cpp UvcGrabber.cpp MjpegUtils.cpp)
 
-add_executable(uvc_streamer AppMain.cpp)
-target_link_libraries(uvc_streamer uvc_streamer_lib)
+add_executable(uvc2http AppMain.cpp)
+target_link_libraries(uvc2http uvc2http_lib)
 
-add_executable(uvc_streamerd DaemonMain.cpp)
-target_link_libraries(uvc_streamerd uvc_streamer_lib)
+add_executable(uvc2http_daemon DaemonMain.cpp)
+target_link_libraries(uvc2http_daemon uvc2http_lib)
 
-install(TARGETS uvc_streamer uvc_streamerd RUNTIME DESTINATION bin)
+install(TARGETS uvc2http uvc2http_daemon RUNTIME DESTINATION bin)

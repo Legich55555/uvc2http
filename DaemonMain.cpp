@@ -108,8 +108,8 @@ int main(int argc, char **argv) {
 
   UvcStreamerCfg config = GetConfig(argc, argv);
   if (!config.IsValid) {
-		return -1;
-	}
+    return -1;
+  }
 
   config.GrabberCfg.SetupCamera = SetupCamera;
     
