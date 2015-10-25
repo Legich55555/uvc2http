@@ -1,5 +1,5 @@
 # uvc2http
-Linux tool for video streaming from USB cameras.
+A Linux tool for video streaming from USB cameras.
 
 Uvc_streamer is an alternative for mjpg_streamer. It is targeted for small
 Linux devices (like routers with OpenWrt).
@@ -18,12 +18,21 @@ Usage:
       - listening at TCP port 8081.
 
 Configuration:
-  * Put your configuration to file "Config.cpp" and rebuild. CLI options are
-    absent because USB cameras have very different options and different 
-    behavior on different systems.
+  * Put your configuration to file "Config.cpp" and rebuild. A few parameters
+    can be specified via CLI:
+      --device DEVICE   camera device name
+      --buffers NUMBER  capture buffers number
+      --width WIDTH     frame width
+      --height HEIGHT   frame height
+      --fps FPS         capture fps
+      --port PORT       HTTP server port
+    For example: uvc2http --device /dev/video0 --buffers 4 --width 1280 --height 720 --fps 30 --port 8080
+  * Note:
+    - Real capture framerate can depend on lighting conditions (exposition settings).
+    - Streameing can influence framerate on clients.
     
 Expected results:
-  * On a router TP-Link MR3020 it produces 15-18 frames at resolution 1280x720.
+  * On a router TP-Link MR3020 it produces up to 20 frames at resolution 1280x720.
   * On a PC with 4 core CPU frame rate is limited only by camera restrictions.
 
 Differences from mjpg_streamer

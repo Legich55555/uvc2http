@@ -1,6 +1,6 @@
 /*******************************************************************************
 #                                                                              #
-# This file is part of uvc2http.                                           #
+# This file is part of uvc2http.                                               #
 #                                                                              #
 # Copyright (C) 2015 Oleg Efremov                                              #
 #                                                                              #
