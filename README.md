@@ -1,20 +1,20 @@
-# uvc_streamer
+# uvc2http
 Linux tool for video streaming from USB cameras.
 
 Uvc_streamer is an alternative for mjpg_streamer. It is targeted for small
-devices with Linux (like routers with OpenWrt).
+Linux devices (like routers with OpenWrt).
 
 Requirements:
   * USB video camera with MJPG capture mode support (tested with Logitech
     B910);
   * Linux system with installed driver "uvcvideo" (tested with router 
-    TP-Link MR3020 + OpenWrt 14.04);
+    TP-Link MR3020 + OpenWrt 15.05);
   * C++11 compiler (tested with GCC 4.8.3).
 
 Usage:
   * Build and run. By default it uses following settings:
       - camera "/dev/video0";
-      - capturing mode 1280x720x30;
+      - capturing mode 640x480x15;
       - listening at TCP port 8081.
 
 Configuration:

@@ -1,6 +1,6 @@
 /*******************************************************************************
 #                                                                              #
-# This file is part of uvc_streamer.                                           #
+# This file is part of uvc2http.                                           #
 #                                                                              #
 # Copyright (C) 2015 Oleg Efremov                                              #
 #                                                                              #
@@ -186,6 +186,6 @@ UvcStreamerCfg GetConfig(int argc, char **argv) {
 }
 
 void PrintUsage() {
-  printf("Usage: uvc_streamer -d /dev/video0 -b 4 -w 640 -h 480 -f 30 -p 8080\n");
+  printf("Usage: uvc2http -d /dev/video0 -b 4 -w 640 -h 480 -f 30 -p 8080\n");
 }
 
