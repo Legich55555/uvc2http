@@ -24,6 +24,7 @@
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <linux/videodev2.h>
+#include <linux/v4l2-controls.h>
 
 #include "Tracer.h"
 #include "Config.h"
@@ -46,11 +47,11 @@ namespace {
     {
       // Disable auto focus
       
-      v4l2_ext_controls ext_ctrls = {0};
       v4l2_ext_control ext_ctrl = {0};
-      ext_ctrl.id = 10094860;
+      ext_ctrl.id = V4L2_CID_FOCUS_AUTO;
       ext_ctrl.value64 = 0;
 
+      v4l2_ext_controls ext_ctrls = {0};
       ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
       ext_ctrls.count = 1;
       ext_ctrls.controls = &ext_ctrl;
@@ -65,15 +66,85 @@ namespace {
       
       const int focusValue = 80;
     
-      v4l2_ext_controls ext_ctrls = {0};
       v4l2_ext_control ext_ctrl = {0};
-      ext_ctrl.id = 10094858;
+      ext_ctrl.id = V4L2_CID_FOCUS_ABSOLUTE;
       ext_ctrl.value64 = focusValue;
 
+      v4l2_ext_controls ext_ctrls = {0};
       ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
       ext_ctrls.count = 1;
       ext_ctrls.controls = &ext_ctrl;
       int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
+      if (ioctlResult != 0) {
+        return false;
+      }
+    }
+    
+    {
+      // Setting "Exposure, Auto" to "Manual Mode"
+      
+      v4l2_ext_control ext_ctrl = {0};
+      ext_ctrl.id = V4L2_CID_EXPOSURE_AUTO;
+      ext_ctrl.value64 = V4L2_EXPOSURE_MANUAL;
+
+      v4l2_ext_controls ext_ctrls = {0};
+      ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
+      ext_ctrls.count = 1;
+      ext_ctrls.controls = &ext_ctrl;
+      int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
+      if (ioctlResult != 0) {
+        return false;
+      }
+    }
+    
+    {
+      // Setting "Exposure, Auto Priority" to "0"
+      
+      v4l2_ext_control ext_ctrl = {0};
+      ext_ctrl.id = V4L2_CID_EXPOSURE_AUTO_PRIORITY;
+      ext_ctrl.value64 = 0;
+
+      v4l2_ext_controls ext_ctrls = {0};
+      ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
+      ext_ctrls.count = 1;
+      ext_ctrls.controls = &ext_ctrl;
+      int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
+      if (ioctlResult != 0) {
+        return false;
+      }
+    }
+    
+    
+
+    {
+      // Setting "Exposure, Absolute" to "300"
+      
+      const int exposureAbsolute = 300;
+      
+      v4l2_ext_control ext_ctrl = {0};
+      ext_ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
+      ext_ctrl.value64 = exposureAbsolute;
+
+      v4l2_ext_controls ext_ctrls = {0};
+      ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
+      ext_ctrls.count = 1;
+      ext_ctrls.controls = &ext_ctrl;
+      int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
+      if (ioctlResult != 0) {
+        return false;
+      }
+    }
+    
+    {
+      // Set maximal possible gain
+      
+      const int gain = 255;
+      
+      v4l2_control control = {0};
+      control.id = V4L2_CID_GAIN;
+      control.value = gain;
+      
+      int ioctlResult = ioctl(cameraFd, VIDIOC_S_CTRL, &control);
       if (ioctlResult != 0) {
         return false;
       }
