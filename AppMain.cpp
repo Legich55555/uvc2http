@@ -49,7 +49,7 @@ namespace {
       
       v4l2_ext_control ext_ctrl = {0};
       ext_ctrl.id = V4L2_CID_FOCUS_AUTO;
-      ext_ctrl.value64 = 0;
+      ext_ctrl.value = 0;
 
       v4l2_ext_controls ext_ctrls = {0};
       ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
@@ -68,7 +68,7 @@ namespace {
     
       v4l2_ext_control ext_ctrl = {0};
       ext_ctrl.id = V4L2_CID_FOCUS_ABSOLUTE;
-      ext_ctrl.value64 = focusValue;
+      ext_ctrl.value = focusValue;
 
       v4l2_ext_controls ext_ctrls = {0};
       ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
@@ -85,7 +85,7 @@ namespace {
       
       v4l2_ext_control ext_ctrl = {0};
       ext_ctrl.id = V4L2_CID_EXPOSURE_AUTO;
-      ext_ctrl.value64 = V4L2_EXPOSURE_MANUAL;
+      ext_ctrl.value = V4L2_EXPOSURE_MANUAL;
 
       v4l2_ext_controls ext_ctrls = {0};
       ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
@@ -102,7 +102,7 @@ namespace {
       
       v4l2_ext_control ext_ctrl = {0};
       ext_ctrl.id = V4L2_CID_EXPOSURE_AUTO_PRIORITY;
-      ext_ctrl.value64 = 0;
+      ext_ctrl.value = 0;
 
       v4l2_ext_controls ext_ctrls = {0};
       ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
@@ -121,7 +121,7 @@ namespace {
       
       v4l2_ext_control ext_ctrl = {0};
       ext_ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
-      ext_ctrl.value64 = exposureAbsolute;
+      ext_ctrl.value = exposureAbsolute;
 
       v4l2_ext_controls ext_ctrls = {0};
       ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
