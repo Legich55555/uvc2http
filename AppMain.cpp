@@ -57,7 +57,7 @@ namespace {
       ext_ctrls.controls = &ext_ctrl;
       int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
       if (ioctlResult != 0) {
-        return false;
+        Tracer::Log("Failed to disable auto focus.\n");
       }
     }
 
@@ -76,7 +76,7 @@ namespace {
       ext_ctrls.controls = &ext_ctrl;
       int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
       if (ioctlResult != 0) {
-        return false;
+        Tracer::Log("Failed to set focus range.\n");
       }
     }
     
@@ -93,7 +93,7 @@ namespace {
       ext_ctrls.controls = &ext_ctrl;
       int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
       if (ioctlResult != 0) {
-        return false;
+        Tracer::Log("Failed to set 'Exposure, Auto'.\n");
       }
     }
     
@@ -110,11 +110,9 @@ namespace {
       ext_ctrls.controls = &ext_ctrl;
       int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
       if (ioctlResult != 0) {
-        return false;
+        Tracer::Log("Failed to disable 'Exposure, Auto Priority'.\n");
       }
     }
-    
-    
 
     {
       // Setting "Exposure, Absolute" to "300"
@@ -131,12 +129,12 @@ namespace {
       ext_ctrls.controls = &ext_ctrl;
       int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
       if (ioctlResult != 0) {
-        return false;
+        Tracer::Log("Failed to set 'Exposure, Absolute'.\n");
       }
     }
     
     {
-      // Set maximal possible gain
+      // Set gain
       
       const int gain = 255;
       
@@ -146,7 +144,7 @@ namespace {
       
       int ioctlResult = ioctl(cameraFd, VIDIOC_S_CTRL, &control);
       if (ioctlResult != 0) {
-        return false;
+        Tracer::Log("Failed to set sensor gain.\n");
       }
     }
 
