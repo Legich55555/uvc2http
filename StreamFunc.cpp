@@ -22,6 +22,7 @@
 #include "StreamFunc.h"
 
 #include <cstdio>
+#include <cinttypes>
 #include <time.h>
 #include <chrono>
 #include <vector>
@@ -97,100 +98,24 @@ namespace UvcStreamer {
       Tracer::Log("Failed to initialize UvcGrabber (is there a UVC camera?). The app will try to initialize later.\n");
     }
     
-//     MeasureStream(uvcGrabber, 130000000);
-//     MeasureStream(uvcGrabber, 80000000);
-//     MeasureStream(uvcGrabber, 50000000);
-//     MeasureStream(uvcGrabber, 20000000);
-//     MeasureStream(uvcGrabber, 10000000);
-//     MeasureStream(uvcGrabber, 9000000);
-//     MeasureStream(uvcGrabber, 7000000);
-//     MeasureStream(uvcGrabber, 5000000);
-//     MeasureStream(uvcGrabber, 4000000);
-//     MeasureStream(uvcGrabber, 3000000);
-//     MeasureStream(uvcGrabber, 2000000);
-//     MeasureStream(uvcGrabber, 1500000);
-//     MeasureStream(uvcGrabber, 1000000);
-//     MeasureStream(uvcGrabber, 750000);
-//     MeasureStream(uvcGrabber, 500000);
-//     MeasureStream(uvcGrabber, 250000);
-//     MeasureStream(uvcGrabber, 100000);
-
-// SleepTimeMicroSec:75000, framesCount: 91, eagainCount: 19910, missedFramesCount: 14.
-// SleepTimeMicroSec:100000, framesCount: 125, eagainCount: 19875, missedFramesCount: 37.
-// SleepTimeMicroSec:125000, framesCount: 124, eagainCount: 19876, missedFramesCount: 51.
-// SleepTimeMicroSec:250000, framesCount: 152, eagainCount: 19848, missedFramesCount: 51.
-// SleepTimeMicroSec:500000, framesCount: 218, eagainCount: 19782, missedFramesCount: 88.
-// SleepTimeMicroSec:750000, framesCount: 371, eagainCount: 19629, missedFramesCount: 141.
-// SleepTimeMicroSec:1000000, framesCount: 504, eagainCount: 19496, missedFramesCount: 209.
-// SleepTimeMicroSec:1500000, framesCount: 669, eagainCount: 19331, missedFramesCount: 260.
-// SleepTimeMicroSec:2000000, framesCount: 1015, eagainCount: 18985, missedFramesCount: 357.
-// SleepTimeMicroSec:2500000, framesCount: 1265, eagainCount: 18735, missedFramesCount: 501.
-// SleepTimeMicroSec:3000000, framesCount: 1634, eagainCount: 18366, missedFramesCount: 604.
-// SleepTimeMicroSec:3500000, framesCount: 2055, eagainCount: 17945, missedFramesCount: 682.
-// SleepTimeMicroSec:4000000, framesCount: 2550, eagainCount: 17450, missedFramesCount: 746.
-// SleepTimeMicroSec:4500000, framesCount: 2832, eagainCount: 17168, missedFramesCount: 838.
-// SleepTimeMicroSec:5000000, framesCount: 3367, eagainCount: 16633, missedFramesCount: 878.
-// SleepTimeMicroSec:50000, framesCount: 3710, eagainCount: 16290, missedFramesCount: 1006.
-// SleepTimeMicroSec:75000, framesCount: 129, eagainCount: 19871, missedFramesCount: 27.
-// SleepTimeMicroSec:100000, framesCount: 140, eagainCount: 19860, missedFramesCount: 36.
-// SleepTimeMicroSec:125000, framesCount: 163, eagainCount: 19837, missedFramesCount: 41.
-// SleepTimeMicroSec:250000, framesCount: 172, eagainCount: 19828, missedFramesCount: 51.
-// SleepTimeMicroSec:500000, framesCount: 264, eagainCount: 19736, missedFramesCount: 74.
-
-
-    const std::vector<long> sleepTimes = {
-      0,
-      10000,
-      25000,
-      50000,
-      75000,
-      100000,
-      125000,
-      250000,
-      500000,
-      750000,
-      1000000,
-      1500000,
-      2000000,
-      2500000,
-      3000000,
-      3500000,
-      4000000,
-      4500000,
-      5000000,
-      6000000,
-      7000000,
-      8000000,
-      9000000,
-      10000000,
-      11000000,
-      12000000,
-      13000000,
-      16000000,
-      17000000,
-      18000000,
-      19000000
-    };
-    
-    for (size_t i = 0; i < sleepTimes.size() && !shouldExit(); ++i) {
+    while (!shouldExit()) {
 
       const uint32_t measureFrames = 500U;
-      const long sleepTimeMicroSec = sleepTimes[i];
+      const long sleepTimeMicroSec = 5000000;
       
-      size_t framesCount = 0U;
-      size_t eagainCount = 0U;
-      size_t missedFramesCount = 0U;
-    
+      uint32_t framesCount = 0U;
+      uint32_t eagainCount = 0U;
+      uint32_t missedFramesCount = 0U;
       uint32_t stopFrameNumber = ~0U;
       uint32_t currentFrameNumber = 0U;
       
       using namespace std::chrono;
 
       microseconds startTs = duration_cast<microseconds>(system_clock::now().time_since_epoch());
+      
+      bool errorDetected = false;
 
       while (!shouldExit() && (currentFrameNumber < stopFrameNumber) ) {
-        
-
         if (uvcGrabber.IsCameraReady() && !uvcGrabber.IsBroken()) {
           const VideoBuffer* videoBuffer = uvcGrabber.DequeuFrame();
           if (videoBuffer != nullptr) {
@@ -213,7 +138,7 @@ namespace UvcStreamer {
             eagainCount++;
           }
         
-          static const long MaxServeTimeMicroSec = (1000000 / 2) / config.GrabberCfg.FrameRate;
+          static const long MaxServeTimeMicroSec = 0; //(1000000 / 2) / config.GrabberCfg.FrameRate;
           httpServer.ServeRequests(MaxServeTimeMicroSec);
           
           // It is safe to sleep for 0.5 ms. There is no significant 
@@ -243,16 +168,27 @@ namespace UvcStreamer {
           ::nanosleep(&RecoveryDelay, nullptr);
           
           uvcGrabber.ReInit();
+          
+          errorDetected = true;
         }
       }
       
-      microseconds stopTs = duration_cast<microseconds>(system_clock::now().time_since_epoch());
-      microseconds duration = stopTs - startTs;
-      
-      float fps = (framesCount * 1000000.f) / duration.count();
+      if (!errorDetected) {
+        microseconds stopTs = duration_cast<microseconds>(system_clock::now().time_since_epoch());
+        microseconds duration = stopTs - startTs;
+        
+        float fps = (framesCount * 1000000.f) / duration.count();
 
-      Tracer::Log("framesCount: %d, eagainCount: %d, missedFramesCount: %d, fps: %f, sleepTimeMicroSec: %lu.\n",
-                  framesCount, eagainCount, missedFramesCount, fps, sleepTimeMicroSec);
+        PRId64;
+        
+        Tracer::Log("framesCount: %" PRIu32 ", "
+                    "eagainCount: %" PRIu32 ", "
+                    "missedFramesCount: %" PRIu32 ", "
+                    "fps: %f, "
+                    "sleepTimeMicroSec: %ld, "
+                    "duration: %" PRIu64 ".\n",
+                    framesCount, eagainCount, missedFramesCount, fps, sleepTimeMicroSec, duration.count());
+      }
     }
     
     return 0;
