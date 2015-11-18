@@ -412,7 +412,7 @@ void HttpServer::SendData(long timeoutMicroSec)
 
 HttpServer::QueueItem* HttpServer::SelectBufferForSending(const timeval& lastBufferTimestamp)
 {
-  for (auto it = _incomeQueue.rbegin(); it != _incomeQueue.rend(); it++) {
+  for (auto it = _incomeQueue.begin(); it != _incomeQueue.end(); it++) {
     const timeval& itemTimestamp = it->SourceData->V4l2Buffer.timestamp;
     if (itemTimestamp.tv_sec > lastBufferTimestamp.tv_sec ||
       (itemTimestamp.tv_sec == lastBufferTimestamp.tv_sec && itemTimestamp.tv_usec > lastBufferTimestamp.tv_usec)) {
@@ -479,21 +479,44 @@ bool HttpServer::QueueBuffer(const VideoBuffer* videoBuffer)
   newFrame.UsageCounter = 0;
   newFrame.SentCounter = 0;
 
+  if (!_incomeQueue.empty() && _incomeQueue.back().SourceData->V4l2Buffer.sequence + 1 < newFrame.SourceData->V4l2Buffer.sequence) {
+    Tracer::Log("HttpServer missed frame[s] before frame %d\n", newFrame.SourceData->V4l2Buffer.sequence);
+  }
+  
   _incomeQueue.push_back(std::move(newFrame));
   
   return true;
 }
 
-const VideoBuffer* HttpServer::DequeueBuffer()
+const VideoBuffer* HttpServer::DequeueBuffer(bool force)
 {
   auto currIt = _incomeQueue.begin();
   while (currIt != _incomeQueue.end()) {
-    auto nextIt = currIt;
-    ++nextIt;
-    
-    if (nextIt != _incomeQueue.end() && 0 == currIt->UsageCounter) {
-      const VideoBuffer* dequeuedBuffer = currIt->SourceData;
 
+    if (currIt != _incomeQueue.end() && 0 == currIt->UsageCounter && (currIt->SentCounter != 0 || force)) {
+      const VideoBuffer* dequeuedBuffer = currIt->SourceData;
+      _incomeQueue.erase(currIt);
+
+      if (!_beingServedClients.empty() && 0 == currIt->SentCounter) {
+        Tracer::Log("HttpServer skipped frame %d %ld.%06ld\n",
+                    dequeuedBuffer->V4l2Buffer.sequence,
+                    dequeuedBuffer->V4l2Buffer.timestamp.tv_sec,
+                    dequeuedBuffer->V4l2Buffer.timestamp.tv_usec);
+      }
+
+      return dequeuedBuffer;
+    }
+      
+    ++currIt;
+  }
+  
+  return nullptr;
+//     auto nextIt = currIt;
+//     ++nextIt;
+//     
+//     if (nextIt != _incomeQueue.end() && 0 == currIt->UsageCounter) {
+//       const VideoBuffer* dequeuedBuffer = currIt->SourceData;
+// 
 // This code is for debugging slow clients      
 //       if (!_beingServedClients.empty()) {
 //         if (0 == currIt->SentCounter) {
@@ -523,15 +546,12 @@ const VideoBuffer* HttpServer::DequeueBuffer()
 //         
 //         lastSentTs = dequeuedBuffer->V4l2Buffer.timestamp;
 //       }
-      
-      _incomeQueue.erase(currIt);
-      return dequeuedBuffer;
-    }
-    
-    currIt = nextIt;
-  }
-  
-  return nullptr;
+//       
+//       _incomeQueue.erase(--currIt.base());
+//       return dequeuedBuffer;
+//     }
+//     
+//     currIt = nextIt;
 }
 
 std::vector<const VideoBuffer*> HttpServer::DequeueAllBuffers()

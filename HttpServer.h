@@ -51,7 +51,7 @@ public:
    *        Finds a buffer which has already been sent to all clients and
    *        returns it otherwise returns nullptr. 
    */
-  const VideoBuffer* DequeueBuffer();
+  const VideoBuffer* DequeueBuffer(bool force);
   
   /*
    * @brief Dequeues all buffers. 

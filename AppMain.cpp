@@ -117,7 +117,7 @@ namespace {
     {
       // Setting "Exposure, Absolute" to "300"
       
-      const int exposureAbsolute = 300;
+      const int exposureAbsolute = 200;
       
       v4l2_ext_control ext_ctrl = {0};
       ext_ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
@@ -136,7 +136,7 @@ namespace {
     {
       // Set gain
       
-      const int gain = 255;
+      const int gain = 32;
       
       v4l2_control control = {0};
       control.id = V4L2_CID_GAIN;
@@ -145,6 +145,9 @@ namespace {
       int ioctlResult = ioctl(cameraFd, VIDIOC_S_CTRL, &control);
       if (ioctlResult != 0) {
         Tracer::Log("Failed to set sensor gain.\n");
+      }
+      else {
+        Tracer::Log("Set sensor gain to %d.\n", gain);
       }
     }
 
@@ -177,9 +180,9 @@ int main(int argc, char **argv) {
     Tracer::Log("Failed to setup SIGTERM handler.\n");
   }
   
-  Tracer::Log("Starting streaming...");
+  Tracer::Log("Starting streaming...\n");
   int res = UvcStreamer::StreamFunc(config, IsSigIntRaised);
-  Tracer::Log("Streaming stopped with code %d", res);
+  Tracer::Log("Streaming stopped with code %d.\n", res);
     
   return res;
 }

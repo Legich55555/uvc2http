@@ -152,9 +152,9 @@ int main(int argc, char **argv) {
       Tracer::Log("Failed to setup SIGTERM handler.\n");
     }
     
-    Tracer::Log("Starting streaming...");
+    Tracer::Log("Starting streaming...\n");
     int res = UvcStreamer::StreamFunc(config, IsSigIntRaised);
-    Tracer::Log("Streaming stopped with code %d", res);
+    Tracer::Log("Streaming stopped with code %d.\n", res);
       
     return res;
   }
