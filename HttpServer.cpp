@@ -30,46 +30,82 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#include <functional>
+#include <algorithm>
+#include <chrono>
 
 #include "MjpegUtils.h"
 #include "Tracer.h"
 
 namespace {
 
-const static size_t MaxServersNum = 8U;
-const static size_t MaxClientsNum = 20U;
+  const static size_t MaxServersNum = 8U;
+  const static size_t MaxClientsNum = 20U;
 
-const size_t ClientReadBufferSize = 2048U;
-std::vector<uint8_t> ClientReadBuffer(ClientReadBufferSize);
+  const size_t ClientReadBufferSize = 2048U;
+  std::vector<uint8_t> ClientReadBuffer(ClientReadBufferSize);
 
-static const uint8_t HttpBoundaryValue[] = "\r\n--BoundaryDoNotCross\r\n";
+  static const uint8_t HttpBoundaryValue[] = "\r\n--BoundaryDoNotCross\r\n";
 
-static const char HttpHeader[] = 
-  "HTTP/1.0 200 OK\r\n" \
-  "Connection: close\r\n" \
-  "Server: uvc-streamer/0.01\r\n" \
-  "Cache-Control: no-store, no-cache, must-revalidate, pre-check=0, post-check=0, max-age=0\r\n" \
-  "Pragma: no-cache\r\n" \
-  "Expires: Thu, 1 Jan 1970 00:00:01 GMT\r\n"
-  "Content-Type: multipart/x-mixed-replace; boundary=BoundaryDoNotCross\r\n" \
-  "\r\n" \
-  "--BoundaryDoNotCross\r\n";
+  static const char HttpHeader[] = 
+    "HTTP/1.0 200 OK\r\n" \
+    "Connection: close\r\n" \
+    "Server: uvc-streamer/0.01\r\n" \
+    "Cache-Control: no-store, no-cache, must-revalidate, pre-check=0, post-check=0, max-age=0\r\n" \
+    "Pragma: no-cache\r\n" \
+    "Expires: Thu, 1 Jan 1970 00:00:01 GMT\r\n"
+    "Content-Type: multipart/x-mixed-replace; boundary=BoundaryDoNotCross\r\n" \
+    "\r\n" \
+    "--BoundaryDoNotCross\r\n";
 
-static const uint32_t HeaderSize = sizeof(HttpHeader) - 1;
+  static const uint32_t HeaderSize = sizeof(HttpHeader) - 1;
 
-bool SetupListeningSocket(int socketFd, const addrinfo* addrInfo, int maxPendingConnections);
-int CreateListeningSocket(const addrinfo* addrInfo);
+  bool SetupListeningSocket(int socketFd, const addrinfo* addrInfo, int maxPendingConnections);
+  int CreateListeningSocket(const addrinfo* addrInfo);
 }
 
 HttpServer::HttpServer()
-  : _listeningFds(0)
+  : _listeningFds(0),
+  _needToStop(false)
 {
   _listeningFds.reserve(MaxServersNum);
 }
 
 HttpServer::~HttpServer()
 {
-  Shutdown();
+}
+
+void HttpServer::WorkFunc() {
+  while (!_needToStop) {
+    if (_beingServedClients.empty()) {
+      ServeRequests();
+    }
+    else {
+      bool thereAreDataForSending;
+      
+      {
+        std::lock_guard<std::mutex> lock(_queueMutex);
+        thereAreDataForSending = HasDataToSend();
+      }
+      
+      if (thereAreDataForSending) {
+        ServeRequests();
+      }
+      else {
+        std::unique_lock<std::mutex> queueLock(_wakeUpMutex);
+        
+        while (std::cv_status::timeout != _wakeUpSending.wait_for(queueLock, std::chrono::milliseconds(10))) {
+
+          std::lock_guard<std::mutex> lock(_queueMutex);
+          for (const QueueItem& frame : _incomeQueue) {
+            if (0 == frame.SentCounter) {
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 bool HttpServer::Init(const char* servicePort)
@@ -102,33 +138,71 @@ bool HttpServer::Init(const char* servicePort)
   
   ::freeaddrinfo(addrInfoHead); 
   
+  if (_listeningFds.empty()) {
+    return false;
+  }
+  
+  std::thread workedThread(&HttpServer::WorkFunc, this);
+  
+  _workedThread.swap(workedThread);
+  
   return !_listeningFds.empty();
 }
 
-void HttpServer::ServeRequests(long maxServeTimeMicroSec)
+void HttpServer::Shutdown()
+{
+  _needToStop = true;
+  _wakeUpSending.notify_one();
+  _workedThread.join();
+
+  DequeueAllFrames();
+  
+  for (auto fd : _listeningFds) {
+    if (-1 == ::close(fd)) {
+      Tracer::LogErrNo("close().\n");
+    }
+  } 
+  _listeningFds.clear();
+
+  for (auto client : _beingServedClients) {
+    if (-1 == ::close(client.first)) {
+      Tracer::LogErrNo("close().\n");
+    }
+  }  
+  _beingServedClients.clear();
+  
+  for (auto client : _waitingClients) {
+    if (-1 == ::close(client.first)) {
+      Tracer::LogErrNo("close().\n");
+    }
+  }  
+  _waitingClients.clear();
+}
+
+
+void HttpServer::ServeRequests()
 {
   // Send data to connected clients
 
   if (!_beingServedClients.empty()) {
-    SendData(maxServeTimeMicroSec);
+    SendData();
   }    
 
-  // If there is only one client then we have to send all grabbed data to it.
-  while (_beingServedClients.size() == 1 && 
-    _beingServedClients.cbegin()->second.VideoBufferIdx != ResponseInfo::InvalidBufferIdx) {
-    
-    SendData(maxServeTimeMicroSec);
-  }
-  
-  
   // Check for new connections.
   
-  // Count and accept only for every 100th call.
-  static uint32_t listenCount = 0;
-  listenCount %= 1000;
-  listenCount += 1;
-  if ((listenCount % 100) == 0) {
+  if (_listeningFds.empty()) {
     return;
+  }
+  
+  size_t cientsNumber = GetClientsNumber();
+  
+  if (cientsNumber != 0) {
+    // Count and accept only for every 100th call.
+    static uint32_t listenCount = 0;
+    listenCount += 1;
+    if ((listenCount % 100) == 0) {
+      return;
+    }
   }
   
   fd_set selectfds;
@@ -146,10 +220,14 @@ void HttpServer::ServeRequests(long maxServeTimeMicroSec)
     }
   }
 
-  timeval selectTimeSpec = { 0 };
-  int result = ::select(maxFd + 1, &selectfds, nullptr, nullptr, &selectTimeSpec);
+  // If there are no clients then we can sleep for long time.
+  static timeval noWaitTimeval = { 0 };
+  static timeval waitTimeval = { .tv_sec = 1, .tv_usec = 0 };
+  timeval selectTimeval = (cientsNumber != 0) ? noWaitTimeval : waitTimeval;
+  
+  int result = ::select(maxFd + 1, &selectfds, nullptr, nullptr, &selectTimeval);
   if (result < 0 && errno != EINTR) {
-    Tracer::LogErrNo("select().");
+    Tracer::LogErrNo("select().\n");
     return;
   }
   
@@ -177,7 +255,7 @@ void HttpServer::ServeRequests(long maxServeTimeMicroSec)
         }
       }
       else {
-        Tracer::LogErrNo("accept().");
+        Tracer::LogErrNo("accept().\n");
       }
     }
   }
@@ -187,15 +265,20 @@ void HttpServer::ServeRequests(long maxServeTimeMicroSec)
 
 bool HttpServer::HasDataToSend() const
 {
-  for (auto clientIt : _beingServedClients) {
+   for (const std::pair<int, ResponseInfo>& client : _beingServedClients) {
     
-    const ResponseInfo& responseInfo = clientIt.second;
+    const ResponseInfo& responseInfo = client.second;
     
-    if (responseInfo.HeaderBytesSent < HeaderSize ||
-      responseInfo.DataBufferIdx != ResponseInfo::InvalidBufferIdx) {
+    if (responseInfo.HeaderBytesSent < HeaderSize || responseInfo.VideoFrameIdx != ResponseInfo::InvalidBufferIdx) {
       return true;
     }
   }  
+  
+  for (const QueueItem& frame : _incomeQueue) {
+    if (0 == frame.SentCounter) {
+      return true;
+    }
+  }
   
   return false;
 }
@@ -207,8 +290,8 @@ void HttpServer::ReadAndParseRequests()
   
   int maxFd = 0;
   
-  for (auto clientFdIt : _waitingClients) {
-    int clientFd = clientFdIt.first;
+  for (const std::pair<int, RequestInfo>& client : _waitingClients) {
+    int clientFd = client.first;
     
     FD_SET(clientFd, &selectFds);
     
@@ -224,14 +307,14 @@ void HttpServer::ReadAndParseRequests()
   timeval selectTimeSpec = {0};
   int result = ::select(maxFd + 1, &selectFds, nullptr, nullptr, &selectTimeSpec);
   if (result < 0 && errno != EINTR && errno != EBADF) {
-    Tracer::LogErrNo("select().");
+    Tracer::LogErrNo("select().\n");
     
     // Something wrong happened with waiting clients. Drop all of them.
     
-    for (auto clientFdIt : _waitingClients) {
-      result = ::close(clientFdIt.first);
+    for (auto waitingClient : _waitingClients) {
+      result = ::close(waitingClient.first);
       if (result < 0) {
-        Tracer::LogErrNo("close().");
+        Tracer::LogErrNo("close().\n");
       }
     }
     
@@ -242,9 +325,9 @@ void HttpServer::ReadAndParseRequests()
   std::list<int> brokenClientFds;
   std::list<int> parsedClientFds;
   
-  for (auto clientFdIt : _waitingClients) {
-    int clientFd = clientFdIt.first;
-    RequestInfo& requestInfo = clientFdIt.second;
+  for (auto waitingClient : _waitingClients) {
+    int clientFd = waitingClient.first;
+    RequestInfo& requestInfo = waitingClient.second;
     
     if (FD_ISSET(clientFd, &selectFds)) {
       ssize_t readResult = ::read(clientFd, ClientReadBuffer.data(), ClientReadBuffer.size());
@@ -270,25 +353,28 @@ void HttpServer::ReadAndParseRequests()
   
   for (auto brokenClientFd : brokenClientFds) {
     if (::close(brokenClientFd) != 0) {
-      Tracer::LogErrNo("close().");
+      Tracer::LogErrNo("close().\n");
     }
   }
   
-  for (auto parsedClientFd : parsedClientFds) {
-    _waitingClients.erase(parsedClientFd);
-    _beingServedClients[parsedClientFd] = ResponseInfo();
+  {
+    std::lock_guard<std::mutex> lock(_queueMutex);
+    for (auto parsedClientFd : parsedClientFds) {
+      _waitingClients.erase(parsedClientFd);
+      _beingServedClients[parsedClientFd] = ResponseInfo();
+    }
   }
 }
 
-void HttpServer::SendData(long timeoutMicroSec)
+void HttpServer::SendData()
 {
   fd_set selectFds;
   FD_ZERO(&selectFds);
   
   int maxFd = 0;
   
-  for (auto clientFdIt : _beingServedClients) {
-    int clientFd = clientFdIt.first;
+  for (auto client: _beingServedClients) {
+    int clientFd = client.first;
     
     FD_SET(clientFd, &selectFds);
     
@@ -301,11 +387,11 @@ void HttpServer::SendData(long timeoutMicroSec)
     return;
   }
   
-  timeval selectTimeSpec = {0, timeoutMicroSec};
+  timeval selectTimeSpec = { 0 };
   
   int result = ::select(maxFd + 1, nullptr, &selectFds, nullptr, &selectTimeSpec);
   if (result < 0 && errno != EINTR) {
-    Tracer::LogErrNo("select().");
+    Tracer::LogErrNo("select().\n");
     return;
   }
   
@@ -315,11 +401,11 @@ void HttpServer::SendData(long timeoutMicroSec)
   
   std::list<int> brokenClientFds;
   
-  for (std::pair<const int, ResponseInfo>& beingServedClientsIt : _beingServedClients) {
-    int clientFd = beingServedClientsIt.first;
+  for (std::pair<const int, ResponseInfo>& client : _beingServedClients) {
+    int clientFd = client.first;
     
     if (FD_ISSET(clientFd, &selectFds)) {
-      ResponseInfo& responseInfo = beingServedClientsIt.second;
+      ResponseInfo& responseInfo = client.second;
       
       bool shouldBreak = false;
       
@@ -336,11 +422,12 @@ void HttpServer::SendData(long timeoutMicroSec)
           else {
             // Stop sending data to the current client as something went wrong.
             shouldBreak = true;
-            Tracer::LogErrNo("write().");
+            Tracer::LogErrNo("write().\n");
             brokenClientFds.push_back(clientFd);
           }
         }      
-        else if (ResponseInfo::InvalidBufferIdx == responseInfo.VideoBufferIdx) {
+        else if (ResponseInfo::InvalidBufferIdx == responseInfo.VideoFrameIdx) {
+          std::lock_guard<std::mutex> lock(_queueMutex);
           HttpServer::QueueItem* queueItem = SelectBufferForSending(responseInfo.Timestamp);
           if (queueItem != nullptr) {
             queueItem->UsageCounter += 1;
@@ -349,7 +436,7 @@ void HttpServer::SendData(long timeoutMicroSec)
             responseInfo.DataBufferBytesSent = 0;
             responseInfo.DataBufferIdx = 0;
             responseInfo.Timestamp = queueItem->SourceData->V4l2Buffer.timestamp;
-            responseInfo.VideoBufferIdx = queueItem->SourceData->Idx;
+            responseInfo.VideoFrameIdx = queueItem->SourceData->Idx;
           }
           else {
             // Stop sending data to the current client as there is no data for sending.
@@ -357,7 +444,8 @@ void HttpServer::SendData(long timeoutMicroSec)
           }
         }
         else {
-          HttpServer::QueueItem* queueItem = GetBuffer(responseInfo.VideoBufferIdx);
+          std::lock_guard<std::mutex> lock(_queueMutex);
+          HttpServer::QueueItem* queueItem = GetBuffer(responseInfo.VideoFrameIdx);
           
           if (nullptr == queueItem) {
             // Stop sending data to the current client as unexpected problem is detected.
@@ -372,7 +460,7 @@ void HttpServer::SendData(long timeoutMicroSec)
               if (responseInfo.DataBufferBytesSent == buffer.Size) {
                 if (responseInfo.DataBufferIdx + 1 >= queueItem->Data.size()) {
                   // The item was sent so we need to find a new item
-                  responseInfo.VideoBufferIdx = ResponseInfo::InvalidBufferIdx;
+                  responseInfo.VideoFrameIdx = ResponseInfo::InvalidBufferIdx;
                   
                   // Release the item.
                   queueItem->UsageCounter -= 1;
@@ -390,7 +478,7 @@ void HttpServer::SendData(long timeoutMicroSec)
             else {
               // Stop sending data to the current client as something went wrong.
               shouldBreak = true;
-              Tracer::LogErrNo("write().");
+              Tracer::LogErrNo("write().\n");
               brokenClientFds.push_back(clientFd);
 
               queueItem->UsageCounter -= 1;
@@ -405,7 +493,7 @@ void HttpServer::SendData(long timeoutMicroSec)
     _beingServedClients.erase(clientFd);
     
     if (-1 == ::close(clientFd)) {
-      Tracer::LogErrNo("close().");
+      Tracer::LogErrNo("close().\n");
     }
   }  
 }
@@ -417,6 +505,14 @@ HttpServer::QueueItem* HttpServer::SelectBufferForSending(const timeval& lastBuf
     if (itemTimestamp.tv_sec > lastBufferTimestamp.tv_sec ||
       (itemTimestamp.tv_sec == lastBufferTimestamp.tv_sec && itemTimestamp.tv_usec > lastBufferTimestamp.tv_usec)) {
       return &(*it);
+    }
+  }
+  
+  // Strange: sometimes under debugger new frames can get very strange timestamps
+  if (!_incomeQueue.empty()) {
+    QueueItem& newestFrame = _incomeQueue.back();
+    if (newestFrame.SourceData->V4l2Buffer.timestamp.tv_sec < lastBufferTimestamp.tv_sec) {
+      return &newestFrame;
     }
   }
   
@@ -434,7 +530,7 @@ HttpServer::QueueItem* HttpServer::GetBuffer(uint32_t videoBufferIdx)
   return nullptr;
 }
 
-bool HttpServer::QueueBuffer(const VideoBuffer* videoBuffer)
+bool HttpServer::QueueFrame(const VideoFrame* videoBuffer)
 {
   std::vector<Buffer> mjpegFrameData = CreateMjpegFrameBufferSet(videoBuffer);
   if (mjpegFrameData.empty()) {
@@ -479,164 +575,134 @@ bool HttpServer::QueueBuffer(const VideoBuffer* videoBuffer)
   newFrame.UsageCounter = 0;
   newFrame.SentCounter = 0;
 
-  if (!_incomeQueue.empty() && _incomeQueue.back().SourceData->V4l2Buffer.sequence + 1 < newFrame.SourceData->V4l2Buffer.sequence) {
-    Tracer::Log("HttpServer missed frame[s] before frame %d\n", newFrame.SourceData->V4l2Buffer.sequence);
+  {
+    std::lock_guard<std::mutex> lock(_queueMutex);
+
+//   const uint32_t missedFrames = _incomeQueue.empty() ? 0 : newFrame.SourceData->V4l2Buffer.sequence - (_incomeQueue.back().SourceData->V4l2Buffer.sequence + 1);
+//   if (missedFrames != 0) {
+//     Tracer::Log("HttpServer missed %d frame[s] before frame %d\n", missedFrames, newFrame.SourceData->V4l2Buffer.sequence);
+//   }
+  
+    _incomeQueue.push_back(std::move(newFrame));
   }
   
-  _incomeQueue.push_back(std::move(newFrame));
+  {
+    std::lock_guard<std::mutex> lock(_wakeUpMutex);
+    _wakeUpSending.notify_one();
+  }
   
   return true;
 }
 
-const VideoBuffer* HttpServer::DequeueBuffer(bool force)
+const VideoFrame* HttpServer::DequeueFrame(bool force)
 {
-  auto currIt = _incomeQueue.begin();
-  while (currIt != _incomeQueue.end()) {
+  auto standardDequeCondition = [](const QueueItem& queueItem) -> bool { 
+    return (queueItem.UsageCounter == 0) && (queueItem.SentCounter != 0); 
+  };
 
-    if (currIt != _incomeQueue.end() && 0 == currIt->UsageCounter && (currIt->SentCounter != 0 || force)) {
-      const VideoBuffer* dequeuedBuffer = currIt->SourceData;
-      _incomeQueue.erase(currIt);
-
-      if (!_beingServedClients.empty() && 0 == currIt->SentCounter) {
-        Tracer::Log("HttpServer skipped frame %d %ld.%06ld\n",
-                    dequeuedBuffer->V4l2Buffer.sequence,
-                    dequeuedBuffer->V4l2Buffer.timestamp.tv_sec,
-                    dequeuedBuffer->V4l2Buffer.timestamp.tv_usec);
-      }
-
-      return dequeuedBuffer;
-    }
-      
-    ++currIt;
-  }
+  auto forcedDequeCondition = [](const QueueItem& queueItem) -> bool {
+    return (queueItem.UsageCounter == 0);
+  };
   
+  auto dequeCondition = force ? forcedDequeCondition : standardDequeCondition;
+
+  {  
+    std::lock_guard<std::mutex> lock(_queueMutex);
+    
+    auto it = std::find_if(_incomeQueue.begin(), _incomeQueue.end(), dequeCondition);
+    if (it != _incomeQueue.end()) {
+      size_t notSentFramesNumber = std::count_if(_incomeQueue.begin(), _incomeQueue.end(), dequeCondition);
+      if (force || notSentFramesNumber > 1) {
+        if (/*!_beingServedClients.empty() &&*/ (0 == it->SentCounter)) {
+          Tracer::Log("HttpServer skipped frame %d %ld.%06ld\n",
+                      it->SourceData->V4l2Buffer.sequence,
+                      it->SourceData->V4l2Buffer.timestamp.tv_sec,
+                      it->SourceData->V4l2Buffer.timestamp.tv_usec);
+        }
+
+        const VideoFrame* dequeuedFrame = it->SourceData;
+
+        _incomeQueue.erase(it);
+      
+        return dequeuedFrame;
+      }
+    }
+  }
+ 
   return nullptr;
-//     auto nextIt = currIt;
-//     ++nextIt;
-//     
-//     if (nextIt != _incomeQueue.end() && 0 == currIt->UsageCounter) {
-//       const VideoBuffer* dequeuedBuffer = currIt->SourceData;
-// 
-// This code is for debugging slow clients      
-//       if (!_beingServedClients.empty()) {
-//         if (0 == currIt->SentCounter) {
-//           Tracer::Log("HttpServer missed frame %d %ld.%06ld\n",
-//                  dequeuedBuffer->V4l2Buffer.sequence,
-//                  dequeuedBuffer->V4l2Buffer.timestamp.tv_sec,
-//                  dequeuedBuffer->V4l2Buffer.timestamp.tv_usec);
-//         }
-//         
-//         static timeval lastSentTs = dequeuedBuffer->V4l2Buffer.timestamp;
-//         
-//         long int delta = 0;
-//         long int seconds = dequeuedBuffer->V4l2Buffer.timestamp.tv_sec - lastSentTs.tv_sec;
-//         
-//         if (seconds > 0) {
-//           delta = seconds * 1000000;
-//           delta -= lastSentTs.tv_usec;
-//           delta += dequeuedBuffer->V4l2Buffer.timestamp.tv_usec;
-//         }
-//         else {
-//           delta = dequeuedBuffer->V4l2Buffer.timestamp.tv_usec - lastSentTs.tv_usec;
-//         }
-//         
-//         if (delta > 40000) {
-//           Tracer::Log("Latency detected for frame %d: %ld\n", dequeuedBuffer->V4l2Buffer.sequence, delta);
-//         }
-//         
-//         lastSentTs = dequeuedBuffer->V4l2Buffer.timestamp;
-//       }
-//       
-//       _incomeQueue.erase(--currIt.base());
-//       return dequeuedBuffer;
-//     }
-//     
-//     currIt = nextIt;
 }
 
-std::vector<const VideoBuffer*> HttpServer::DequeueAllBuffers()
+std::vector<const VideoFrame*> HttpServer::DequeueAllFrames()
 {
-  std::vector<const VideoBuffer*> result;
-  result.reserve(_incomeQueue.size());
-  for (auto item : _incomeQueue) {
-    result.push_back(item.SourceData);
+  std::vector<const VideoFrame*> result;
+
+  {
+    std::lock_guard<std::mutex> lock(_queueMutex);
+
+    result.reserve(_incomeQueue.size());
+    for (auto item : _incomeQueue) {
+      result.push_back(item.SourceData);
+    }
   }
   
   // We have to wait till all currenty being transmitted buffers are sent.
-  
-  static const unsigned int SleepTimeInUSec = 5000;
-  static const unsigned int MaxTotalSleepTimeInUs = 500000U;
-  static const unsigned int MaxAttempts = MaxTotalSleepTimeInUs / SleepTimeInUSec;
-  
   auto isUnused = [](const QueueItem& queueItem) -> bool {
     return 0 == queueItem.UsageCounter; 
   };
   
-  for (unsigned int attempt = 0; attempt < MaxAttempts && !_incomeQueue.empty(); ++attempt) {
-    // Remove all unused VideoBuffers from _incomeQueue.
-    _incomeQueue.remove_if(isUnused);
-    
-    // Send already being transmitted VideoBuffer-s
-    SendData(SleepTimeInUSec);
+  static const unsigned int MaxAttempts = 5U;
+  for (unsigned int attempt = 0; attempt < MaxAttempts; ++attempt) {
+    // Send already being transmitted VideoFrame-s
+    SendData();
+
+    {
+      std::lock_guard<std::mutex> lock(_queueMutex);
+      
+      // Remove all unused VideoFrames from _incomeQueue.
+      _incomeQueue.remove_if(isUnused);
+     
+      if (_incomeQueue.empty()) {
+        break;
+      }
+    }
   }
   
-  if (!_incomeQueue.empty()) {
-    std::list<int> brokenClientFds;
-    for (auto client : _beingServedClients) {
-      ResponseInfo& responseInfo = client.second;
-      if (responseInfo.VideoBufferIdx != ResponseInfo::InvalidBufferIdx) {
-        HttpServer::QueueItem* queueItem = GetBuffer(responseInfo.VideoBufferIdx);
+  {
+    std::lock_guard<std::mutex> lock(_queueMutex);
+  
+    if (!_incomeQueue.empty()) {
+      std::list<int> brokenClientFds;
+      for (auto client : _beingServedClients) {
+        ResponseInfo& responseInfo = client.second;
+        if (responseInfo.VideoFrameIdx != ResponseInfo::InvalidBufferIdx) {
+          HttpServer::QueueItem* queueItem = GetBuffer(responseInfo.VideoFrameIdx);
+            
+          if (queueItem != nullptr) {
+            responseInfo.VideoFrameIdx = ResponseInfo::InvalidBufferIdx;
+            queueItem->UsageCounter -= 1;
+          }
           
-        if (queueItem != nullptr) {
-           responseInfo.VideoBufferIdx = ResponseInfo::InvalidBufferIdx;
-           queueItem->UsageCounter -= 1;
+          brokenClientFds.push_back(client.first);
+        }
+      }  
+      
+      for (auto clientFd : brokenClientFds) {
+        _beingServedClients.erase(clientFd);
+      
+        if (-1 == ::close(clientFd)) {
+          Tracer::LogErrNo("close().\n");
         }
         
-        brokenClientFds.push_back(client.first);
-      }
-    }  
+        Tracer::Log("Closed slow client.");
+      }  
+    }
     
-    for (auto clientFd : brokenClientFds) {
-      _beingServedClients.erase(clientFd);
-    
-      if (-1 == ::close(clientFd)) {
-        Tracer::LogErrNo("close().");
-      }
-      
-      Tracer::Log("Closed slow client.");
-    }  
+    _incomeQueue.remove_if(isUnused);
   }
-  
-  _incomeQueue.remove_if(isUnused);
   
   return result;
 }
 
-void HttpServer::Shutdown()
-{
-  DequeueAllBuffers();
-  
-  for (auto client : _beingServedClients) {
-    if (-1 == ::close(client.first)) {
-      Tracer::LogErrNo("close().");
-    }
-  }  
-  _beingServedClients.clear();
-  
-  for (auto client : _waitingClients) {
-    if (-1 == ::close(client.first)) {
-      Tracer::LogErrNo("close().");
-    }
-  }  
-  
-  for (auto fd : _listeningFds) {
-    if (-1 == ::close(fd)) {
-      Tracer::LogErrNo("close().");
-    }
-  } 
-  
-  _listeningFds.clear();
-}
 
 namespace {
 
@@ -645,23 +711,23 @@ namespace {
     // Ignore "socket already in use" errors 
     int reuseAddrValue = 1;
     if (::setsockopt(socketFd, SOL_SOCKET, SO_REUSEADDR, &reuseAddrValue, sizeof(reuseAddrValue)) != 0) {
-      Tracer::LogErrNo("setsockopt(SO_REUSEADDR).");
+      Tracer::LogErrNo("setsockopt(SO_REUSEADDR).\n");
       return false;
     }
     
     // Switch to non-blocking mode
     if (::fcntl(socketFd, F_SETFL, O_NONBLOCK) < 0) {
-      Tracer::LogErrNo("fcntl(F_SETFL, O_NONBLOCK).");
+      Tracer::LogErrNo("fcntl(F_SETFL, O_NONBLOCK).\n");
       return false;
     }
     
     if (::bind(socketFd, addrInfo->ai_addr, addrInfo->ai_addrlen) != 0) {
-      Tracer::LogErrNo("bind().");
+      Tracer::LogErrNo("bind().\n");
       return false;
     }
     
     if (::listen(socketFd, maxPendingConnections) != 0) {
-      Tracer::LogErrNo("listen().");
+      Tracer::LogErrNo("listen().\n");
       return false;
     }
     
@@ -674,13 +740,13 @@ namespace {
 
     int socketFd = ::socket(addrInfo->ai_family, addrInfo->ai_socktype, 0);
     if (-1 == socketFd) {
-      Tracer::LogErrNo("Failed to create a socket.");
+      Tracer::LogErrNo("Failed to create a socket.\n");
       return -1;
     }
     
     if (!SetupListeningSocket(socketFd, addrInfo, MaxPendingConnections)) {
       ::close(socketFd);
-      Tracer::Log("Failed to configure a listening socket.");
+      Tracer::Log("Failed to configure a listening socket.\n");
       return -1;
     }
     

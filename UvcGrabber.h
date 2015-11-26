@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-struct VideoBuffer;
+struct VideoFrame;
 struct v4l2_buffer;
 
 /**
@@ -67,10 +67,14 @@ public:
   /// @brief Return true if camera was successfully initialized.
   bool IsCameraReady() const { return _cameraFd != -1; }
 
-  const VideoBuffer* DequeuFrame();
+  /// @brief Try to get a captured frame from queue.
+  const VideoFrame* DequeuFrame();
 
-  void RequeueFrame(const VideoBuffer* buffer);
+  /// @brief Return a frame to queue.
+  void RequeueFrame(const VideoFrame* buffer);
   
+  /// @brief Return a number of queued frames.
+  ///        UVC driver cannot capture new frames if there are no queued frames.
   unsigned GetQueuedFramesNumber() const { return _queuedBuffersCount; }
 
   UvcGrabber() = delete;
@@ -89,7 +93,7 @@ private:
   bool DequeuBuffer(v4l2_buffer& v4l2Buffer);
   
   Config _config;
-  std::vector<VideoBuffer> _videoBuffers;
+  std::vector<VideoFrame> _videoBuffers;
   int _cameraFd;
   bool _isBroken;
   

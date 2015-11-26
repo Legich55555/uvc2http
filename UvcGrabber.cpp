@@ -64,7 +64,7 @@ bool UvcGrabber::Init()
     return false;
   }
   
-  _cameraFd = open(_config.CameraDeviceName.c_str(), O_RDWR | O_NONBLOCK);
+  _cameraFd = open(_config.CameraDeviceName.c_str(), O_RDWR);
   if (-1 == _cameraFd) {
     Tracer::LogErrNo("Failed open().\n");
     _cameraFd = -1;
@@ -127,7 +127,7 @@ void UvcGrabber::Shutdown()
   _queuedBuffersCount = 0;
 }
 
-const VideoBuffer* UvcGrabber::DequeuFrame()
+const VideoFrame* UvcGrabber::DequeuFrame()
 {
   if (_isBroken) {
     Tracer::Log("Invalid call for DequeuFrame.\n");
@@ -164,7 +164,7 @@ const VideoBuffer* UvcGrabber::DequeuFrame()
   return &(_videoBuffers[v4l2Buffer.index]);
 }
 
-void UvcGrabber::RequeueFrame(const VideoBuffer* videoBuffer) 
+void UvcGrabber::RequeueFrame(const VideoFrame* videoBuffer) 
 {
   if (videoBuffer->V4l2Buffer.index >= _videoBuffers.size()) {
     Tracer::Log("Unexpected buffer index.\n");
@@ -181,8 +181,9 @@ void UvcGrabber::QueueBuffer(v4l2_buffer& v4l2Buffer)
     Tracer::Log("Failed Ioctl(VIDIOC_QBUF).\n");
     _isBroken = true;
   }
-  
-  _queuedBuffersCount += 1U;
+  else {
+    _queuedBuffersCount += 1U;
+  }
 }
 
 bool UvcGrabber::DequeuBuffer(v4l2_buffer& v4l2Buffer)
@@ -196,10 +197,10 @@ bool UvcGrabber::DequeuBuffer(v4l2_buffer& v4l2Buffer)
 
     return false;
   }
-  
-  _queuedBuffersCount -= 1U;
-  
-  return true;
+  else {
+    _queuedBuffersCount -= 1U;
+    return true;
+  }
 }
 
 void UvcGrabber::FreeBuffers()
@@ -263,7 +264,7 @@ bool UvcGrabber::SetupBuffers()
       break;
     }
     
-    _videoBuffers.push_back(VideoBuffer {0});
+    _videoBuffers.push_back(VideoFrame {0});
     
     _videoBuffers[bufferIdx].Data = static_cast<uint8_t*>(bufferAddress);
     _videoBuffers[bufferIdx].Idx = bufferIdx;

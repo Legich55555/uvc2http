@@ -25,6 +25,7 @@
 #include <sys/ioctl.h>
 #include <linux/videodev2.h>
 #include <linux/v4l2-controls.h>
+#include <atomic>
 
 #include "Tracer.h"
 #include "Config.h"
@@ -32,14 +33,15 @@
 
 namespace {
 
-  volatile bool IsSigIntRaisedFlag = false;
+  std::atomic<bool> NeedToStopWorkFunc(false);
 
   void sigIntHandler(int sig) {
-    IsSigIntRaisedFlag = true;
+    Tracer::Log("Interruption....\n");
+    NeedToStopWorkFunc = true;
   }
   
   bool IsSigIntRaised(void) {
-    return IsSigIntRaisedFlag;
+    return NeedToStopWorkFunc;
   }
   
   // This function disables auto focus and sets focus distance to ~1.2 meter (good choice for RC toys cameras). 
@@ -117,7 +119,7 @@ namespace {
     {
       // Setting "Exposure, Absolute" to "300"
       
-      const int exposureAbsolute = 200;
+      const int exposureAbsolute = 300;
       
       v4l2_ext_control ext_ctrl = {0};
       ext_ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;

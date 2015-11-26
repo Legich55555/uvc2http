@@ -46,7 +46,7 @@ namespace UvcStreamer {
     while (frameCount < 1000U) {
       
       if (uvcGrabber.IsCameraReady() && !uvcGrabber.IsBroken()) {
-        const VideoBuffer* videoBuffer = uvcGrabber.DequeuFrame();
+        const VideoFrame* videoBuffer = uvcGrabber.DequeuFrame();
         if (videoBuffer != nullptr) {
           if (0 == lastSeq) {
             lastSeq = videoBuffer->V4l2Buffer.sequence;
@@ -82,10 +82,11 @@ namespace UvcStreamer {
                 sleepInNanoSeconds, d.count(), (1000.f * 1000) / d.count(), eagainCount);
 //    std::cout << sleepInNanoSeconds << ", d: " << d.count() << ", fps:" << 1000.f / d.count() * 1000 << " eagain: " << eagainCount << std::endl;
   }
-  
-  
+   
   int StreamFunc(const UvcStreamerCfg& config, ShouldExit shouldExit) {
     
+    using namespace std::chrono;
+
     HttpServer httpServer;
     if (!httpServer.Init(config.ServerCfg.ServicePort.c_str())) {
       Tracer::Log("Failed to initialize HTTP server.\n");
@@ -95,70 +96,74 @@ namespace UvcStreamer {
     // Init and configure UVC video camera
     UvcGrabber uvcGrabber(config.GrabberCfg);
     if (!uvcGrabber.Init()) {
-      Tracer::Log("Failed to initialize UvcGrabber (is there a UVC camera?). The app will try to initialize later.\n");
+      Tracer::Log("Failed to initialize UvcGrabber (is there a UVC camera?). The app will try to initialize it later.\n");
     }
     
+    static const uint32_t measureFrames = 500U;
+    
+    unsigned queuedCountToHttpServer = 0U;
+    
     while (!shouldExit()) {
-
-      const uint32_t measureFrames = 500U;
-      const long sleepTimeMicroSec = 5000000;
       
-      uint32_t framesCount = 0U;
-      uint32_t eagainCount = 0U;
-      uint32_t missedFramesCount = 0U;
+      // Frames counters
+      uint32_t frames = 0U;
+      uint32_t eagains = 0U;
+      uint32_t missed = 0U;
+      uint32_t starvations = 0U;
+      
       uint32_t stopFrameNumber = ~0U;
       uint32_t currentFrameNumber = 0U;
       
-      using namespace std::chrono;
-
       microseconds startTs = duration_cast<microseconds>(system_clock::now().time_since_epoch());
       
       bool errorDetected = false;
 
       while (!shouldExit() && (currentFrameNumber < stopFrameNumber) ) {
         if (uvcGrabber.IsCameraReady() && !uvcGrabber.IsBroken()) {
-          const VideoBuffer* videoBuffer = uvcGrabber.DequeuFrame();
+          const VideoFrame* videoBuffer = uvcGrabber.DequeuFrame();
+          
           if (videoBuffer != nullptr) {
-            if (0 == framesCount) {
+            if (0 == frames) {
               stopFrameNumber = videoBuffer->V4l2Buffer.sequence + measureFrames;
             }
             else {
-              missedFramesCount += videoBuffer->V4l2Buffer.sequence - (currentFrameNumber + 1);
+              missed += videoBuffer->V4l2Buffer.sequence - (currentFrameNumber + 1);
             }
 
             currentFrameNumber = videoBuffer->V4l2Buffer.sequence;
 
-            if (!httpServer.QueueBuffer(videoBuffer)) {
+            if (!httpServer.QueueFrame(videoBuffer)) {
               uvcGrabber.RequeueFrame(videoBuffer);
             }
+            else {
+              queuedCountToHttpServer++;
+            }
             
-            framesCount++;
+            frames++;
           }
           else {
-            eagainCount++;
+            eagains++;
           }
-        
-          static const long MaxServeTimeMicroSec = 0; //(1000000 / 2) / config.GrabberCfg.FrameRate;
-          httpServer.ServeRequests(MaxServeTimeMicroSec);
           
-          // It is safe to sleep for 0.5 ms. There is no significant 
-          // difference (in terms of CPU utilization) in comparison with 
-          // sleeping for a rest of time.
-          
-          const timespec sleepTimeSpec {.tv_sec = 0, .tv_nsec = sleepTimeMicroSec};
-          ::nanosleep(&sleepTimeSpec, nullptr);
-          
-          bool forceHttpDequeue = (uvcGrabber.GetQueuedFramesNumber() <= 2); 
+          if (queuedCountToHttpServer > 2) {
+            bool forceHttpDequeue = (uvcGrabber.GetQueuedFramesNumber() <= 1);
+            if (forceHttpDequeue) {
+              starvations++;
+            }
 
-          const VideoBuffer* releasedBuffer = httpServer.DequeueBuffer(forceHttpDequeue);
-          while (releasedBuffer != nullptr) {
-            uvcGrabber.RequeueFrame(releasedBuffer);
-          
-            releasedBuffer = httpServer.DequeueBuffer(false);
+            const VideoFrame* releasedBuffer;
+            
+            do {
+              releasedBuffer = httpServer.DequeueFrame(forceHttpDequeue);
+              if (releasedBuffer != nullptr) {
+                queuedCountToHttpServer--;
+                uvcGrabber.RequeueFrame(releasedBuffer);
+              }
+            } while (queuedCountToHttpServer > 1 && releasedBuffer != nullptr);
           }
         }
         else {
-          std::vector<const VideoBuffer*> buffers = httpServer.DequeueAllBuffers();
+          std::vector<const VideoFrame*> buffers = httpServer.DequeueAllFrames();
           for (auto buffer : buffers) {
             uvcGrabber.RequeueFrame(buffer);
           }
@@ -177,19 +182,19 @@ namespace UvcStreamer {
         microseconds stopTs = duration_cast<microseconds>(system_clock::now().time_since_epoch());
         microseconds duration = stopTs - startTs;
         
-        float fps = (framesCount * 1000000.f) / duration.count();
+        float fps = (frames * 1000000.f) / duration.count();
 
-        PRId64;
-        
-        Tracer::Log("framesCount: %" PRIu32 ", "
-                    "eagainCount: %" PRIu32 ", "
-                    "missedFramesCount: %" PRIu32 ", "
+        Tracer::Log("captured frames: %" PRIu32 ", "
+                    "eagain count: %" PRIu32 ", "
+                    "missed frames: %" PRIu32 ", "
+                    "starvations: %" PRIu32 ", "
                     "fps: %f, "
-                    "sleepTimeMicroSec: %ld, "
                     "duration: %" PRIu64 ".\n",
-                    framesCount, eagainCount, missedFramesCount, fps, sleepTimeMicroSec, duration.count());
+                    frames, eagains, missed, starvations, fps, duration.count());
       }
     }
+    
+    httpServer.Shutdown();
     
     return 0;
   }

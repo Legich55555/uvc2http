@@ -116,7 +116,7 @@ int main(int argc, char **argv) {
   int pid = fork();
   if (-1 == pid)
   {
-    Tracer::Log("fork() failed");
+    Tracer::Log("fork() failed.\n");
     return -1;
   }
   
@@ -126,7 +126,9 @@ int main(int argc, char **argv) {
     
     setsid();
     
-    chdir("/");
+    if ( chdir("/") != 0) {
+      Tracer::LogErrNo("Failed to change directory to /.\n");
+    }
     
     ::fclose(stderr);
     ::fclose(stdout);
