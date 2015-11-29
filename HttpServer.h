@@ -32,10 +32,8 @@
 
 #include "Buffer.h"
 
-/*
- * @brief HttpServer implements minimal HTTP server for sending MJPEG frames.
- * 
- * */
+/** @brief HttpServer implements minimal HTTP server for sending MJPEG frames.
+ */
 class HttpServer
 {
 public:
@@ -45,27 +43,25 @@ public:
 
   bool Init(const char* servicePort);
   
-  /*
-   * @brief Shutdowns all connections and frees all resources. 
+  /** @brief Shutdowns all connections and frees all resources. 
    */
   void Shutdown();
   
-  /*
-   * @brief Adds a buffer to a queue "to be sent". 
-   *        Returns true if buffer was successfully queued.
+  /** @brief Adds a buffer to a queue "to be sent". 
+   *
+   *  @return Returns true if buffer was successfully queued.
    */
   bool QueueFrame(const VideoFrame* videoBuffer);
   
-  /*
-   * @brief Dequeues a buffer.
-   *        Finds a buffer which has already been sent to all clients and
-   *        returns it otherwise returns nullptr. 
+  /** @brief Dequeues a buffer.
+   *
+   *  @return A buffer which was dequeued or nullptr. 
    */
   const VideoFrame* DequeueFrame(bool force);
   
-  /*
-   * @brief Dequeues all buffers. 
-   *        If a client connection is slow then it is dropped.
+  /** @brief Dequeues all buffers. 
+   *
+   *  If a client connection is slow then it is dropped.
    */
   std::vector<const VideoFrame*> DequeueAllFrames();
   
@@ -101,15 +97,13 @@ private:
   
   void WorkFunc();
 
-  /*
-   * @brief Returns true if there are data for client (headers or MJPEG data). 
+  /** @brief Returns true if there are data for client (headers or MJPEG data). 
    */
   bool HasDataToSend() const;
 
   std::size_t GetClientsNumber() const { return _beingServedClients.size() + _waitingClients.size(); }
   
-  /*
-   * @brief Accepts a new requests, sends images to active peers. 
+  /** @brief Accepts a new requests, sends images to active peers. 
    */
   void ServeRequests();
   

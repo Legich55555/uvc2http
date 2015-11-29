@@ -76,35 +76,24 @@ HttpServer::~HttpServer()
 }
 
 void HttpServer::WorkFunc() {
+  
   while (!_needToStop) {
-    if (_beingServedClients.empty()) {
-      ServeRequests();
-    }
-    else {
+    if (!_beingServedClients.empty()) {
       bool thereAreDataForSending;
-      
       {
         std::lock_guard<std::mutex> lock(_queueMutex);
         thereAreDataForSending = HasDataToSend();
       }
       
-      if (thereAreDataForSending) {
-        ServeRequests();
-      }
-      else {
+      if (!thereAreDataForSending) {
         std::unique_lock<std::mutex> queueLock(_wakeUpMutex);
-        
-        while (std::cv_status::timeout != _wakeUpSending.wait_for(queueLock, std::chrono::milliseconds(10))) {
 
-          std::lock_guard<std::mutex> lock(_queueMutex);
-          for (const QueueItem& frame : _incomeQueue) {
-            if (0 == frame.SentCounter) {
-              break;
-            }
-          }
-        }
+        // Sleep for 15 ms (<~60 fps) and do not care about timeouts or spurious wakeups.
+        _wakeUpSending.wait_for(queueLock, std::chrono::milliseconds(15));
       }
     }
+    
+    ServeRequests();
   }
 }
 
@@ -182,11 +171,7 @@ void HttpServer::Shutdown()
 
 void HttpServer::ServeRequests()
 {
-  // Send data to connected clients
-
-  if (!_beingServedClients.empty()) {
-    SendData();
-  }    
+  SendData();
 
   // Check for new connections.
   
@@ -221,9 +206,9 @@ void HttpServer::ServeRequests()
   }
 
   // If there are no clients then we can sleep for long time.
-  static timeval noWaitTimeval = { 0 };
-  static timeval waitTimeval = { .tv_sec = 1, .tv_usec = 0 };
-  timeval selectTimeval = (cientsNumber != 0) ? noWaitTimeval : waitTimeval;
+  const static timeval NO_WAIT_TIMEVAL = { 0 };
+  const static timeval WAIT_TIMEVAL = { .tv_sec = 1, .tv_usec = 0 };
+  timeval selectTimeval = (cientsNumber != 0) ? NO_WAIT_TIMEVAL : WAIT_TIMEVAL;
   
   int result = ::select(maxFd + 1, &selectfds, nullptr, nullptr, &selectTimeval);
   if (result < 0 && errno != EINTR) {
@@ -236,10 +221,30 @@ void HttpServer::ServeRequests()
       
       sockaddr_storage sockAddr = {0};
       socklen_t sockAddrSize = sizeof(sockAddr);
-      
       int clientFd = ::accept(_listeningFds[i], reinterpret_cast<sockaddr*>(&sockAddr), &sockAddrSize);
       if (-1 != clientFd) {
         if (GetClientsNumber() < MaxClientsNum) {
+          
+          // This value should be calculated from picture size, fps and network conditions.
+          static const int SEND_BUFFER_SIZE = 512 * 1024;
+          
+          int sendBuffSetSize = SEND_BUFFER_SIZE;
+          result = setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sendBuffSetSize, sizeof(sendBuffSetSize));
+          if (-1 == result) {
+            Tracer::LogErrNo("setsockopt() SOL_SOCKET, SO_SNDBUF, %d.\n", sendBuffSetSize);
+          }
+          
+          socklen_t optLen;
+          int sendBuffGetSize;
+          result = getsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sendBuffGetSize, &optLen);
+          if (-1 == result) {
+            Tracer::LogErrNo("getsockopt() SOL_SOCKET, SO_SNDBUF.");
+          }
+          else {
+            Tracer::Log("Successfully changed socket send buffer. Requested size: %d, blessed size: %d.\n", 
+                        sendBuffSetSize, sendBuffGetSize);
+          }
+          
           result = ::fcntl(clientFd, F_SETFL, O_NONBLOCK);
           if (-1 == result) {
             Tracer::LogErrNo("fcntl() F_SETFL, O_NONBLOCK.");
@@ -459,11 +464,18 @@ void HttpServer::SendData()
               responseInfo.DataBufferBytesSent += writeResult;
               if (responseInfo.DataBufferBytesSent == buffer.Size) {
                 if (responseInfo.DataBufferIdx + 1 >= queueItem->Data.size()) {
+
                   // The item was sent so we need to find a new item
                   responseInfo.VideoFrameIdx = ResponseInfo::InvalidBufferIdx;
                   
                   // Release the item.
                   queueItem->UsageCounter -= 1;
+
+//                   // Check the max transmission rate
+//                   responseInfo.HeaderBytesSent = 0;
+//                   responseInfo.DataBufferIdx = 0;
+//                   responseInfo.DataBufferBytesSent = 0; 
+//                   shouldBreak = true;
                 }
                 else {
                   // Switch to next buffer
