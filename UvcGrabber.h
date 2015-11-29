@@ -25,13 +25,12 @@
 #include <string>
 #include <vector>
 
-struct VideoBuffer;
+struct VideoFrame;
+struct v4l2_buffer;
 
-
-/*
+/**
  * @brief UvcGrabber captures data from UVC camera device.
- * 
- * */
+ */
 class UvcGrabber
 {
 public:
@@ -45,32 +44,38 @@ public:
     uint32_t FrameRate; 
     uint32_t BuffersNumber;
 
-    // Function which is called for app specific camera configuration.
+    /// @brief Function which is called for app specific camera configuration.
     SetupCameraFunc SetupCamera;
   };
 
   explicit UvcGrabber(const Config& config);
   ~UvcGrabber();
   
-  // @brief Initializes video capture. Returns true if initialization was successfull.
+  /// @brief Initializes video capture. Returns true if initialization was successfull.
   bool Init();
   
-  // @brief ReInitializes video capture. Returns true if initialization was successfull.
+  /// @brief ReInitializes video capture. Returns true if initialization was successfull.
   bool ReInit();
   
-  // @brief Shutdowns video capture and free all used resources.
+  /// @brief Shutdowns video capture and free all used resources.
   void Shutdown();
 
-  // @brief Return true if fatal error happened during dequeuing/requeing of frames
-  //        Expected recovery steps: requeu all dequed frames, call Shutdown() and then Init().
+  /// @brief Return true if fatal error happened during dequeuing/requeing of frames
+  ///        Expected recovery steps: requeu all dequed frames, call Shutdown() and then Init().
   bool IsBroken() const { return _isBroken; }
 
-  // @brief Return true if camera was successfully initialized.
+  /// @brief Return true if camera was successfully initialized.
   bool IsCameraReady() const { return _cameraFd != -1; }
 
-  const VideoBuffer* DequeuFrame();
+  /// @brief Try to get a captured frame from queue.
+  const VideoFrame* DequeuFrame();
 
-  void RequeueFrame(const VideoBuffer* buffer);
+  /// @brief Return a frame to queue.
+  void RequeueFrame(const VideoFrame* buffer);
+  
+  /// @brief Return a number of queued frames.
+  ///        UVC driver cannot capture new frames if there are no queued frames.
+  unsigned GetQueuedFramesNumber() const { return _queuedBuffersCount; }
 
   UvcGrabber() = delete;
   UvcGrabber(const UvcGrabber& other) = delete;
@@ -78,10 +83,21 @@ public:
   
 private:
   
+
+  bool SetupCamera();
+  
+  bool SetupBuffers();
+  void FreeBuffers();
+  
+  void QueueBuffer(v4l2_buffer& v4l2Buffer);
+  bool DequeuBuffer(v4l2_buffer& v4l2Buffer);
+  
   Config _config;
-  std::vector<VideoBuffer> _videoBuffers;
+  std::vector<VideoFrame> _videoBuffers;
   int _cameraFd;
   bool _isBroken;
+  
+  unsigned _queuedBuffersCount;
 };
 
 #endif // UVCGRABBER_H

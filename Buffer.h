@@ -31,7 +31,7 @@ struct Buffer {
   uint32_t Size;
 };
 
-struct VideoBuffer {
+struct VideoFrame {
   const uint8_t* Data;  // Mmapped address of a v4l2 buffer.
   uint32_t Size;        // Current size of data in buffer.
   uint32_t Length;      // Buffer length (used for unmapping).

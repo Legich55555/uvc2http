@@ -24,6 +24,8 @@
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <linux/videodev2.h>
+#include <linux/v4l2-controls.h>
+#include <atomic>
 
 #include "Tracer.h"
 #include "Config.h"
@@ -31,14 +33,15 @@
 
 namespace {
 
-  volatile bool IsSigIntRaisedFlag = false;
+  std::atomic<bool> NeedToStopWorkFunc(false);
 
   void sigIntHandler(int sig) {
-    IsSigIntRaisedFlag = true;
+    Tracer::Log("Interruption....\n");
+    NeedToStopWorkFunc = true;
   }
   
   bool IsSigIntRaised(void) {
-    return IsSigIntRaisedFlag;
+    return NeedToStopWorkFunc;
   }
   
   // This function disables auto focus and sets focus distance to ~1.2 meter (good choice for RC toys cameras). 
@@ -46,17 +49,17 @@ namespace {
     {
       // Disable auto focus
       
-      v4l2_ext_controls ext_ctrls = {0};
       v4l2_ext_control ext_ctrl = {0};
-      ext_ctrl.id = 10094860;
-      ext_ctrl.value64 = 0;
+      ext_ctrl.id = V4L2_CID_FOCUS_AUTO;
+      ext_ctrl.value = 0;
 
+      v4l2_ext_controls ext_ctrls = {0};
       ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
       ext_ctrls.count = 1;
       ext_ctrls.controls = &ext_ctrl;
       int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
       if (ioctlResult != 0) {
-        return false;
+        Tracer::Log("Failed to disable auto focus.\n");
       }
     }
 
@@ -65,17 +68,88 @@ namespace {
       
       const int focusValue = 80;
     
-      v4l2_ext_controls ext_ctrls = {0};
       v4l2_ext_control ext_ctrl = {0};
-      ext_ctrl.id = 10094858;
-      ext_ctrl.value64 = focusValue;
+      ext_ctrl.id = V4L2_CID_FOCUS_ABSOLUTE;
+      ext_ctrl.value = focusValue;
 
+      v4l2_ext_controls ext_ctrls = {0};
       ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
       ext_ctrls.count = 1;
       ext_ctrls.controls = &ext_ctrl;
       int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
       if (ioctlResult != 0) {
-        return false;
+        Tracer::Log("Failed to set focus range.\n");
+      }
+    }
+    
+    {
+      // Setting "Exposure, Auto" to "Manual Mode"
+      
+      v4l2_ext_control ext_ctrl = {0};
+      ext_ctrl.id = V4L2_CID_EXPOSURE_AUTO;
+      ext_ctrl.value = V4L2_EXPOSURE_MANUAL;
+
+      v4l2_ext_controls ext_ctrls = {0};
+      ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
+      ext_ctrls.count = 1;
+      ext_ctrls.controls = &ext_ctrl;
+      int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
+      if (ioctlResult != 0) {
+        Tracer::Log("Failed to set 'Exposure, Auto'.\n");
+      }
+    }
+    
+    {
+      // Setting "Exposure, Auto Priority" to "0"
+      
+      v4l2_ext_control ext_ctrl = {0};
+      ext_ctrl.id = V4L2_CID_EXPOSURE_AUTO_PRIORITY;
+      ext_ctrl.value = 0;
+
+      v4l2_ext_controls ext_ctrls = {0};
+      ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
+      ext_ctrls.count = 1;
+      ext_ctrls.controls = &ext_ctrl;
+      int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
+      if (ioctlResult != 0) {
+        Tracer::Log("Failed to disable 'Exposure, Auto Priority'.\n");
+      }
+    }
+
+    {
+      // Setting "Exposure, Absolute" to "300"
+      
+      const int exposureAbsolute = 300;
+      
+      v4l2_ext_control ext_ctrl = {0};
+      ext_ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
+      ext_ctrl.value = exposureAbsolute;
+
+      v4l2_ext_controls ext_ctrls = {0};
+      ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_USER;
+      ext_ctrls.count = 1;
+      ext_ctrls.controls = &ext_ctrl;
+      int ioctlResult = ioctl(cameraFd, VIDIOC_S_EXT_CTRLS, &ext_ctrls);
+      if (ioctlResult != 0) {
+        Tracer::Log("Failed to set 'Exposure, Absolute'.\n");
+      }
+    }
+    
+    {
+      // Set gain
+      
+      const int gain = 32;
+      
+      v4l2_control control = {0};
+      control.id = V4L2_CID_GAIN;
+      control.value = gain;
+      
+      int ioctlResult = ioctl(cameraFd, VIDIOC_S_CTRL, &control);
+      if (ioctlResult != 0) {
+        Tracer::Log("Failed to set sensor gain.\n");
+      }
+      else {
+        Tracer::Log("Set sensor gain to %d.\n", gain);
       }
     }
 
@@ -108,9 +182,9 @@ int main(int argc, char **argv) {
     Tracer::Log("Failed to setup SIGTERM handler.\n");
   }
   
-  Tracer::Log("Starting streaming...");
+  Tracer::Log("Starting streaming...\n");
   int res = UvcStreamer::StreamFunc(config, IsSigIntRaised);
-  Tracer::Log("Streaming stopped with code %d", res);
+  Tracer::Log("Streaming stopped with code %d.\n", res);
     
   return res;
 }

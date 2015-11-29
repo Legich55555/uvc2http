@@ -20,6 +20,7 @@
 *******************************************************************************/
 
 #include "MjpegUtils.h"
+#include "Tracer.h"
 
 #include "Buffer.h"
 
@@ -61,7 +62,7 @@ const static uint8_t HaffmanTable[] = {
     0xe8, 0xe9, 0xea, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa
 };
 
-std::unique_ptr<MjpegFrame> CreateMjpegFrame(const VideoBuffer* videoBuffer)
+std::unique_ptr<MjpegFrame> CreateMjpegFrame(const VideoFrame* videoBuffer)
 {
   const uint8_t baselineDctMarkerPart1 = 0xFF;
   const uint8_t baselineDctMarkerPart2 = 0xC0;
@@ -90,7 +91,7 @@ std::unique_ptr<MjpegFrame> CreateMjpegFrame(const VideoBuffer* videoBuffer)
   return result;
 }
 
-std::vector<Buffer> CreateMjpegFrameBufferSet(const VideoBuffer* videoBuffer)
+std::vector<Buffer> CreateMjpegFrameBufferSet(const VideoFrame* videoBuffer)
 {
   const uint8_t baselineDctMarkerPart1 = 0xFF;
   const uint8_t baselineDctMarkerPart2 = 0xC0;
@@ -102,18 +103,15 @@ std::vector<Buffer> CreateMjpegFrameBufferSet(const VideoBuffer* videoBuffer)
   }
   
   if (currPtr >= videoBuffer->Data + videoBuffer->Size) {
-    return std::vector<Buffer>();
+    Tracer::Log("Failed to create a MJPG frame.\n");
+    return std::vector<Buffer> { };
   }
   
   const uint32_t headerSize = currPtr - videoBuffer->Data;
   
-  std::vector<Buffer> result(3);
-  result[0].Data = videoBuffer->Data;
-  result[0].Size = headerSize;
-  result[1].Data = HaffmanTable;
-  result[1].Size = sizeof(HaffmanTable);
-  result[2].Data = currPtr;
-  result[2].Size = videoBuffer->Size - headerSize;
-  
-  return std::move(result);
+  return std::vector<Buffer> {
+    { .Data = videoBuffer->Data, .Size = headerSize },
+    { .Data = HaffmanTable, .Size = sizeof(HaffmanTable) },
+    { .Data = currPtr, .Size = videoBuffer->Size - headerSize }
+  };
 }

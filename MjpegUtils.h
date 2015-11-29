@@ -28,7 +28,7 @@
 #include "UvcGrabber.h"
 #include "Buffer.h"
 
-struct VideoBuffer;
+struct VideoFrame;
 
 struct MjpegFrame {
   const void* Header;
@@ -40,12 +40,12 @@ struct MjpegFrame {
   const void* Data;
   uint32_t DataSize;
   
-  const VideoBuffer* SourceBuffer;
+  const VideoFrame* SourceBuffer;
 };
 
-std::unique_ptr<MjpegFrame> CreateMjpegFrame(const VideoBuffer* videoBuffer);
+std::unique_ptr<MjpegFrame> CreateMjpegFrame(const VideoFrame* videoBuffer);
 
-std::vector<Buffer> CreateMjpegFrameBufferSet(const VideoBuffer* videoBuffer);
+std::vector<Buffer> CreateMjpegFrameBufferSet(const VideoFrame* videoBuffer);
 
 
 #endif // MJPEGUTILS_H

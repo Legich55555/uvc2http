@@ -35,7 +35,7 @@ namespace Tracer {
       return fileno(stderr) != -1;
     }
     
-    void LogVArgs( const char* format, va_list args) {
+    void LogVArgs(const char* format, va_list args) {
       
       if (IsStdErrReady()) {
         std::vfprintf(stderr, format, args);
@@ -65,8 +65,12 @@ namespace Tracer {
     va_start(args, format);
     LogVArgs(format, args);
     va_end(args);
-
-    const char* errnoDescription = strerror(errno);
-    Log("%s\n", errnoDescription);
+    
+    char errorMessageBuff[128] = {0};
+    
+    char* errorMessage = strerror_r(errno, errorMessageBuff, sizeof(errorMessageBuff));
+    if (errorMessage != nullptr) {
+      Log("%s\n", errorMessage);
+    }
   }
 }
