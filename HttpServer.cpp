@@ -135,7 +135,9 @@ void HttpServer::Shutdown()
 
 void HttpServer::ServeRequests()
 {
-  SendData();
+  if (HasDataToSend()) {
+    SendData();
+  }
 
   // Check for new connections.
   

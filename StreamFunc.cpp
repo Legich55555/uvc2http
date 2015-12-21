@@ -50,9 +50,9 @@ namespace UvcStreamer {
       Tracer::Log("Failed to initialize UvcGrabber (is there a UVC camera?). The app will try to initialize it later.\n");
     }
     
-    static const uint32_t measureFrames = 500U;
+    static const uint32_t MEASURE_FRAMES = 500U;
     
-    unsigned queuedCountToHttpServer = 0U;
+    unsigned queuedToHttpServerCount = 0U;
     
     while (!shouldExit()) {
       
@@ -75,7 +75,7 @@ namespace UvcStreamer {
           
           if (videoBuffer != nullptr) {
             if (0 == frames) {
-              stopFrameNumber = videoBuffer->V4l2Buffer.sequence + measureFrames;
+              stopFrameNumber = videoBuffer->V4l2Buffer.sequence + MEASURE_FRAMES;
             }
             else {
               missed += videoBuffer->V4l2Buffer.sequence - (currentFrameNumber + 1);
@@ -87,19 +87,18 @@ namespace UvcStreamer {
               uvcGrabber.RequeueFrame(videoBuffer);
             }
             else {
-              queuedCountToHttpServer++;
+              queuedToHttpServerCount++;
             }
             
             frames++;
           }
           else {
-            const timespec SLEEP_TIMESPEC {1, 0};
+            const timespec SLEEP_TIMESPEC {0, 2000000};
             ::nanosleep(&SLEEP_TIMESPEC, nullptr);
-
             eagains++;
           }
           
-          if (queuedCountToHttpServer > 2) {
+          if (queuedToHttpServerCount > 2) {
             bool forceHttpDequeue = (uvcGrabber.GetQueuedFramesNumber() <= 1);
             if (forceHttpDequeue) {
               starvations++;
@@ -110,10 +109,10 @@ namespace UvcStreamer {
             do {
               releasedBuffer = httpServer.DequeueFrame(forceHttpDequeue);
               if (releasedBuffer != nullptr) {
-                queuedCountToHttpServer--;
+                queuedToHttpServerCount--;
                 uvcGrabber.RequeueFrame(releasedBuffer);
               }
-            } while (queuedCountToHttpServer > 1 && releasedBuffer != nullptr);
+            } while (queuedToHttpServerCount > 1 && releasedBuffer != nullptr);
           }
         }
         else {
